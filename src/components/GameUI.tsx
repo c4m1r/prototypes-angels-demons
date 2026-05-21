@@ -10,6 +10,8 @@ interface GameUIProps {
   gameState: GameState;
   selectedUnits: Unit[];
   selectedBuildings: Building[];
+  inspectedUnit: Unit | null;
+  inspectedBuilding: Building | null;
   onProduceUnit: (building: Building, unitType: UnitType) => void;
   onBuildBuilding: (buildingType: BuildingType) => void;
   onAddToSquad: (unit: Unit) => void;
@@ -20,6 +22,8 @@ export default function GameUI({
   gameState,
   selectedUnits,
   selectedBuildings,
+  inspectedUnit,
+  inspectedBuilding,
   onProduceUnit,
   onBuildBuilding,
   onAddToSquad,
@@ -391,30 +395,44 @@ export default function GameUI({
   );
 
   const renderPortraitPanel = () => {
-    const selected = selectedUnits[0] || selectedBuildings[0];
+    const selected = selectedUnits[0] || selectedBuildings[0] || inspectedUnit || inspectedBuilding;
     if (!selected) return null;
 
+    const isEnemy = inspectedUnit !== null || inspectedBuilding !== null;
     const isUnit = 'squadSize' in selected;
-    const config = isUnit ? UNIT_CONFIGS[(selected as Unit).type] : BUILDING_CONFIGS[(selected as Building).type];
+    const unit = isUnit ? (selected as Unit) : null;
+    const building = !isUnit ? (selected as Building) : null;
+
+    const config = isUnit ? UNIT_CONFIGS[unit!.type] : BUILDING_CONFIGS[building!.type];
     const portrait = isUnit ? (config as typeof UNIT_CONFIGS[UnitType]).portrait : (config as typeof BUILDING_CONFIGS[BuildingType]).ascii;
     const name = config.name;
     const typeLabel = isUnit
-      ? ((selected as Unit).isHero ? 'Герой' : (config as typeof UNIT_CONFIGS[UnitType]).isMelee ? 'Ближний бой' : 'Дальний бой')
+      ? (unit!.isHero ? 'Герой' : (config as typeof UNIT_CONFIGS[UnitType]).isMelee ? 'Ближний бой' : 'Дальний бой')
       : 'Здание';
+
+    const ownerTeam = gameState.teams[(isUnit ? unit!.teamId : building!.teamId)];
+    const ownerFaction = FACTION_CONFIGS[ownerTeam.faction];
+    const borderColor = isEnemy ? ownerTeam.color : factionConfig.color;
+    const glowColor = isEnemy ? ownerTeam.glowColor : factionConfig.glowColor;
 
     return (
       <div className="bg-slate-900/90 border border-slate-700/50 rounded-lg p-3">
+        {isEnemy && (
+          <div className="text-[10px] text-red-400 mb-2 font-semibold uppercase tracking-wider">
+            Разведка -- {ownerFaction.name}
+          </div>
+        )}
         <div className="flex gap-3">
           <div
             className="w-24 h-24 flex flex-col items-center justify-center rounded border-2 shrink-0"
             style={{
-              borderColor: factionConfig.color,
-              backgroundColor: `${factionConfig.color}11`,
-              boxShadow: `0 0 12px ${factionConfig.color}33`,
+              borderColor,
+              backgroundColor: `${borderColor}11`,
+              boxShadow: `0 0 12px ${borderColor}33`,
             }}
           >
             {portrait.map((line, i) => (
-              <div key={i} className="font-mono text-xs leading-tight whitespace-pre" style={{ color: factionConfig.glowColor }}>
+              <div key={i} className="font-mono text-xs leading-tight whitespace-pre" style={{ color: glowColor }}>
                 {line}
               </div>
             ))}
@@ -424,7 +442,7 @@ export default function GameUI({
             <div className="text-[10px] text-slate-400">{typeLabel}</div>
             {isUnit && (
               <div className="text-[10px] text-slate-500 mt-1">
-                Ур. {(selected as Unit).level}
+                Ур. {unit!.level}
               </div>
             )}
           </div>

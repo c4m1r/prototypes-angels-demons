@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { GameState, Position, Unit, Building, MAP_SIZES, MapSize, CombatEvent } from '../types/game';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
+import { isBuilder } from '../engine/gameEngine';
 
 interface GameCanvasProps {
   gameState: GameState;
   mapSize: MapSize;
   camera: Position;
+  buildModeActive: boolean;
   onCameraChange: (camera: Position) => void;
   onMouseDown: (screenPos: Position, worldPos: Position) => void;
   onMouseMove: (screenPos: Position, worldPos: Position) => void;
@@ -18,6 +20,7 @@ export default function GameCanvas({
   gameState,
   mapSize,
   camera,
+  buildModeActive,
   onCameraChange,
   onMouseDown,
   onMouseMove,
@@ -138,6 +141,31 @@ export default function GameCanvas({
       } else if (obj.unit) {
         drawUnit(ctx, obj.unit, camera, team.color, team.glowColor, now);
       }
+    });
+
+    const buildRadius = 160;
+    gameState.teams.forEach(team => {
+      if (!team.isPlayer) return;
+      team.units.forEach(unit => {
+        if (!isBuilder(unit.type)) return;
+        if (!unit.selected && !buildModeActive) return;
+
+        const sx = unit.position.x - camera.x;
+        const sy = unit.position.y - camera.y;
+
+        ctx.strokeStyle = `${team.color}55`;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(sx, sy, buildRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = `${team.color}08`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, buildRadius, 0, Math.PI * 2);
+        ctx.fill();
+      });
     });
 
     gameState.combatEvents.forEach(event => {

@@ -33,6 +33,8 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
   const [mouseDownPos, setMouseDownPos] = useState<Position | null>(null);
   const [buildMode, setBuildMode] = useState<BuildingType | null>(null);
   const [camera, setCamera] = useState<Position>(() => getInitialCamera(gameState));
+  const [inspectedUnit, setInspectedUnit] = useState<Unit | null>(null);
+  const [inspectedBuilding, setInspectedBuilding] = useState<Building | null>(null);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -124,6 +126,36 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
         });
       }
 
+      if (!clickedUnit && !clickedBuilding) {
+        gameState.teams.forEach(team => {
+          if (team.id === gameState.playerTeam) return;
+          team.units.forEach(unit => {
+            if (distance(unit.position, worldPos) < 25 && !clickedUnit) clickedUnit = unit;
+          });
+          team.buildings.forEach(building => {
+            if (distance(building.position, worldPos) < 50 && !clickedBuilding) clickedBuilding = building;
+          });
+        });
+
+        if (clickedUnit || clickedBuilding) {
+          playerTeam.units.forEach(u => u.selected = false);
+          playerTeam.buildings.forEach(b => b.selected = false);
+          setInspectedUnit(clickedUnit || null);
+          setInspectedBuilding(!clickedUnit && clickedBuilding ? clickedBuilding : null);
+
+          setGameState(prev => ({
+            ...prev,
+            selectedUnits: [],
+            selectionBox: undefined,
+          }));
+          setMouseDownPos(null);
+          return;
+        }
+      }
+
+      setInspectedUnit(null);
+      setInspectedBuilding(null);
+
       playerTeam.units.forEach(u => u.selected = false);
       playerTeam.buildings.forEach(b => b.selected = false);
 
@@ -184,8 +216,8 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
         const builder = selectedBuilders[0];
         const angle = Math.random() * Math.PI * 2;
         buildPos = {
-          x: builder.position.x + Math.cos(angle) * 80,
-          y: builder.position.y + Math.sin(angle) * 80,
+          x: builder.position.x + Math.cos(angle) * 160,
+          y: builder.position.y + Math.sin(angle) * 160,
         };
       }
 
@@ -340,6 +372,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
             gameState={gameState}
             mapSize={mapSize}
             camera={camera}
+            buildModeActive={buildMode !== null}
             onCameraChange={setCamera}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
@@ -381,6 +414,8 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
             gameState={gameState}
             selectedUnits={selectedUnits}
             selectedBuildings={selectedBuildings}
+            inspectedUnit={inspectedUnit}
+            inspectedBuilding={inspectedBuilding}
             onProduceUnit={handleProduceUnit}
             onBuildBuilding={handleBuildBuilding}
             onAddToSquad={handleAddToSquad}
