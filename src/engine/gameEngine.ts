@@ -2,6 +2,7 @@ import {
   GameState, Team, Unit, Building, FactionType, Position,
   UnitType, Difficulty, MapSize, ControlPoint, CombatEvent,
   LevelUpStat, FACTION_CONFIGS, MAP_SIZES, getAIProfile, AIPersonality,
+  DeathMarker, SpeechBubble, SpeechAction, SPEECH_LINES,
 } from '../types/game';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
@@ -56,6 +57,7 @@ export function initializeGame(
       selected: false,
       productionProgress: 0,
       productionTime: 0,
+      productionQueue: [],
       isTurret: false,
       turretRange: 0,
       turretDamage: 0,
@@ -113,6 +115,14 @@ export function initializeGame(
     });
   }
 
+  const revealedTiles: boolean[][] = [];
+  for (let y = 0; y < map.height; y++) {
+    revealedTiles[y] = [];
+    for (let x = 0; x < map.width; x++) {
+      revealedTiles[y][x] = false;
+    }
+  }
+
   return {
     teams,
     playerTeam: playerTeamIndex,
@@ -123,6 +133,9 @@ export function initializeGame(
     gameTime: 0,
     combatEvents: [],
     gameOver: null,
+    deathMarkers: [],
+    speechBubbles: [],
+    revealedTiles,
   };
 }
 
@@ -131,6 +144,8 @@ export function updateGame(state: GameState, deltaTime: number): GameState {
 
   const newState = { ...state, gameTime: state.gameTime + deltaTime };
   const combatEvents: CombatEvent[] = [];
+  const deathMarkers: DeathMarker[] = [];
+  const speechBubbles: SpeechBubble[] = [];
 
   newState.teams = newState.teams.map(team => {
     if (team.defeated) return team;
@@ -193,6 +208,14 @@ export function updateGame(state: GameState, deltaTime: number): GameState {
           building.producing = undefined;
           building.productionProgress = 0;
           building.productionTime = 0;
+
+          if (building.productionQueue.length > 0) {
+            const nextType = building.productionQueue.shift()!;
+            const nextConfig = UNIT_CONFIGS[nextType];
+            building.producing = nextType;
+            building.productionTime = nextConfig.buildTime;
+            building.productionProgress = 0;
+          }
         }
       }
 
@@ -254,6 +277,15 @@ export function updateGame(state: GameState, deltaTime: number): GameState {
           color: '#ff3333',
         });
 
+        deathMarkers.push({
+          id: `dm-${Date.now()}-${Math.random()}`,
+          position: { ...unit.position },
+          timestamp: Date.now(),
+          isBuilding: false,
+        });
+
+        speechBubbles.push(createSpeechBubble(unit, 'death'));
+
         awardKillExperience(unit, newState);
         return false;
       }
@@ -271,6 +303,14 @@ export function updateGame(state: GameState, deltaTime: number): GameState {
           timestamp: Date.now(),
           color: '#ff3333',
         });
+
+        deathMarkers.push({
+          id: `dm-${Date.now()}-${Math.random()}`,
+          position: { ...building.position },
+          timestamp: Date.now(),
+          isBuilding: true,
+        });
+
         return false;
       }
       return true;
@@ -306,6 +346,14 @@ export function updateGame(state: GameState, deltaTime: number): GameState {
   const now = Date.now();
   const existingEvents = newState.combatEvents.filter(e => now - e.timestamp < 1500);
   newState.combatEvents = [...existingEvents, ...combatEvents];
+
+  const existingDeathMarkers = newState.deathMarkers.filter(dm => now - dm.timestamp < 60000);
+  newState.deathMarkers = [...existingDeathMarkers, ...deathMarkers];
+
+  const existingBubbles = newState.speechBubbles.filter(sb => now - sb.timestamp < 3000);
+  newState.speechBubbles = [...existingBubbles, ...speechBubbles];
+
+  newState.revealedTiles = updateFogOfWar(newState);
 
   return newState;
 }
@@ -732,4 +780,93 @@ export function getMapSizeFromState(state: GameState): MapSize {
   if (state.map.width >= 70) return 'large';
   if (state.map.width >= 50) return 'medium';
   return 'small';
+}
+
+function updateFogOfWar(state: GameState): boolean[][] {
+  const revealed = state.revealedTiles.map(row => [...row]);
+  const playerTeam = state.teams[state.playerTeam];
+  const tileSize = 32;
+  const visionRadius = 8;
+
+  playerTeam.units.forEach(unit => {
+    const tileX = Math.floor(unit.position.x / tileSize);
+    const tileY = Math.floor(unit.position.y / tileSize);
+    for (let dy = -visionRadius; dy <= visionRadius; dy++) {
+      for (let dx = -visionRadius; dx <= visionRadius; dx++) {
+        const tx = tileX + dx;
+        const ty = tileY + dy;
+        if (tx >= 0 && tx < state.map.width && ty >= 0 && ty < state.map.height) {
+          if (dx * dx + dy * dy <= visionRadius * visionRadius) {
+            revealed[ty][tx] = true;
+          }
+        }
+      }
+    }
+  });
+
+  playerTeam.buildings.forEach(building => {
+    const tileX = Math.floor(building.position.x / tileSize);
+    const tileY = Math.floor(building.position.y / tileSize);
+    for (let dy = -visionRadius; dy <= visionRadius; dy++) {
+      for (let dx = -visionRadius; dx <= visionRadius; dx++) {
+        const tx = tileX + dx;
+        const ty = tileY + dy;
+        if (tx >= 0 && tx < state.map.width && ty >= 0 && ty < state.map.height) {
+          if (dx * dx + dy * dy <= visionRadius * visionRadius) {
+            revealed[ty][tx] = true;
+          }
+        }
+      }
+    }
+  });
+
+  return revealed;
+}
+
+export function isTileVisible(state: GameState, tileX: number, tileY: number): boolean {
+  if (!state.revealedTiles[tileY]?.[tileX]) return false;
+  const playerTeam = state.teams[state.playerTeam];
+  const tileSize = 32;
+  const activeVisionRadius = 6;
+
+  for (const unit of playerTeam.units) {
+    const ux = Math.floor(unit.position.x / tileSize);
+    const uy = Math.floor(unit.position.y / tileSize);
+    const dx = tileX - ux;
+    const dy = tileY - uy;
+    if (dx * dx + dy * dy <= activeVisionRadius * activeVisionRadius) return true;
+  }
+
+  for (const building of playerTeam.buildings) {
+    const bx = Math.floor(building.position.x / tileSize);
+    const by = Math.floor(building.position.y / tileSize);
+    const dx = tileX - bx;
+    const dy = tileY - by;
+    if (dx * dx + dy * dy <= activeVisionRadius * activeVisionRadius) return true;
+  }
+
+  return false;
+}
+
+function createSpeechBubble(unit: Unit, action: SpeechAction): SpeechBubble {
+  const lines = SPEECH_LINES[unit.faction][action];
+  const text = lines[Math.floor(Math.random() * lines.length)];
+  return {
+    id: `sb-${Date.now()}-${Math.random()}`,
+    unitId: unit.id,
+    position: { ...unit.position },
+    text,
+    timestamp: Date.now(),
+    action,
+  };
+}
+
+export function addSpeechBubble(state: GameState, unit: Unit, action: SpeechAction): SpeechBubble {
+  const now = Date.now();
+  const existing = state.speechBubbles.find(sb => sb.unitId === unit.id);
+  if (existing && now - existing.timestamp < 3000) {
+    existing.text = '';
+    existing.timestamp = 0;
+  }
+  return createSpeechBubble(unit, action);
 }

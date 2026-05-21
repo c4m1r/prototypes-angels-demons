@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   GameState, FactionType, Position, Unit, Building, UnitType, BuildingType,
-  MapSize, Difficulty, MAP_SIZES, LevelUpStat, FACTION_CONFIGS,
+  MapSize, Difficulty, MAP_SIZES, LevelUpStat, FACTION_CONFIGS, SpeechAction,
 } from '../types/game';
-import { initializeGame, updateGame, distance, isBuilder, applyLevelUp, getMapSizeFromState } from '../engine/gameEngine';
+import { initializeGame, updateGame, distance, isBuilder, applyLevelUp, getMapSizeFromState, addSpeechBubble } from '../engine/gameEngine';
 import { updateAI } from '../engine/ai';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
@@ -242,6 +242,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
           selected: false,
           productionProgress: 0,
           productionTime: 0,
+          productionQueue: [],
           isTurret: config.isTurret,
           turretRange: config.turretRange,
           turretDamage: config.turretDamage,
@@ -250,6 +251,13 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
 
         playerTeam.buildings.push(newBuilding);
         playerTeam.resources -= config.cost;
+
+        selectedBuilders.forEach(builder => {
+          const bubble = addSpeechBubble(gameState, builder, 'build');
+          gameState.speechBubbles = gameState.speechBubbles.filter(sb => sb.unitId !== builder.id);
+          gameState.speechBubbles.push(bubble);
+        });
+
         setGameState({ ...gameState });
       }
       setBuildMode(null);
@@ -279,6 +287,13 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
         unit.path = [];
         unit.pathIndex = 0;
       });
+
+      const speaker = selectedUnits[0];
+      if (speaker) {
+        const bubble = addSpeechBubble(gameState, speaker, 'attack');
+        gameState.speechBubbles = gameState.speechBubbles.filter(sb => sb.unitId !== speaker.id);
+        gameState.speechBubbles.push(bubble);
+      }
     } else if (targetBuilding) {
       selectedUnits.forEach(unit => {
         if (isBuilder(unit.type)) {
@@ -294,6 +309,14 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
         unit.path = [];
         unit.pathIndex = 0;
       });
+
+      const speaker = selectedUnits[0];
+      if (speaker) {
+        const action: SpeechAction = isBuilder(speaker.type) ? 'repair' : 'attack';
+        const bubble = addSpeechBubble(gameState, speaker, action);
+        gameState.speechBubbles = gameState.speechBubbles.filter(sb => sb.unitId !== speaker.id);
+        gameState.speechBubbles.push(bubble);
+      }
     } else {
       selectedUnits.forEach(unit => {
         const currentMapSize = getMapSizeFromState(gameState);
@@ -312,6 +335,13 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
         unit.targetUnit = undefined;
         unit.targetBuilding = undefined;
       });
+
+      const speaker = selectedUnits[0];
+      if (speaker) {
+        const bubble = addSpeechBubble(gameState, speaker, 'move');
+        gameState.speechBubbles = gameState.speechBubbles.filter(sb => sb.unitId !== speaker.id);
+        gameState.speechBubbles.push(bubble);
+      }
     }
 
     setGameState({ ...gameState });
@@ -322,10 +352,15 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     const config = UNIT_CONFIGS[unitType];
 
     if (playerTeam.resources >= config.cost) {
-      building.producing = unitType;
-      building.productionTime = config.buildTime;
-      building.productionProgress = 0;
       playerTeam.resources -= config.cost;
+
+      if (!building.producing) {
+        building.producing = unitType;
+        building.productionTime = config.buildTime;
+        building.productionProgress = 0;
+      } else {
+        building.productionQueue.push(unitType);
+      }
       setGameState({ ...gameState });
     }
   }, [gameState]);

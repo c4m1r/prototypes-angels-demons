@@ -162,15 +162,25 @@ export default function GameUI({
                 style={{ width: `${(building.productionProgress / (building.productionTime * 1000)) * 100}%` }}
               />
             </div>
+            {building.productionQueue.length > 0 && (
+              <div className="mt-1 flex gap-1 flex-wrap">
+                {building.productionQueue.map((unitType, idx) => (
+                  <div key={idx} className="text-[10px] bg-slate-700/50 px-1.5 py-0.5 rounded text-slate-300 border border-slate-600/50">
+                    {UNIT_CONFIGS[unitType].name}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
-        {config.canProduce && !building.producing && (
+        {config.canProduce && (
           <div className="space-y-1">
             <div className="text-xs text-slate-400 mb-1">Найти:</div>
             {config.canProduce.map(unitType => {
               const unitConfig = UNIT_CONFIGS[unitType];
               const canAfford = playerTeam.resources >= unitConfig.cost;
+              const queueCount = building.productionQueue.filter(u => u === unitType).length + (building.producing === unitType ? 1 : 0);
 
               return (
                 <button
@@ -187,6 +197,7 @@ export default function GameUI({
                     <span style={{ color: factionConfig.color }}>{unitConfig.ascii}</span>
                     <span>{unitConfig.name}</span>
                     {unitConfig.isHero && <span className="text-yellow-400 text-[10px] font-bold">ГЕРОЙ</span>}
+                    {queueCount > 0 && <span className="text-[10px] text-yellow-400">({queueCount})</span>}
                   </span>
                   <span className="text-yellow-400">{unitConfig.cost}</span>
                 </button>

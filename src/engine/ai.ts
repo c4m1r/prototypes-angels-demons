@@ -25,6 +25,7 @@ export function updateAI(state: GameState): GameState {
       mainBuilding.producing = builderType;
       mainBuilding.productionTime = UNIT_CONFIGS[builderType].buildTime;
       mainBuilding.productionProgress = 0;
+      mainBuilding.productionQueue = [];
       team.resources -= UNIT_CONFIGS[builderType].cost;
     }
 
@@ -67,12 +68,15 @@ export function updateAI(state: GameState): GameState {
     }
 
     const productionBuildings = team.buildings.filter(b =>
-      !b.producing && BUILDING_CONFIGS[b.type].canProduce && BUILDING_CONFIGS[b.type].canProduce!.length > 0
+      BUILDING_CONFIGS[b.type].canProduce && BUILDING_CONFIGS[b.type].canProduce!.length > 0
     );
 
     productionBuildings.forEach(building => {
       const canProduce = BUILDING_CONFIGS[building.type].canProduce;
       if (!canProduce || canProduce.length === 0) return;
+
+      const queueSize = building.productionQueue.length + (building.producing ? 1 : 0);
+      if (queueSize >= 5) return;
 
       let unitType: UnitType | undefined;
 
@@ -95,10 +99,15 @@ export function updateAI(state: GameState): GameState {
 
       if (unitType) {
         const config = UNIT_CONFIGS[unitType];
-        building.producing = unitType;
-        building.productionTime = config.buildTime;
-        building.productionProgress = 0;
         team.resources -= config.cost;
+
+        if (!building.producing) {
+          building.producing = unitType;
+          building.productionTime = config.buildTime;
+          building.productionProgress = 0;
+        } else {
+          building.productionQueue.push(unitType);
+        }
       }
     });
 
@@ -196,6 +205,7 @@ function createBuilding(
     selected: false,
     productionProgress: 0,
     productionTime: 0,
+    productionQueue: [],
     isTurret: config.isTurret,
     turretRange: config.turretRange,
     turretDamage: config.turretDamage,

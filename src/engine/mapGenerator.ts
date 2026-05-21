@@ -1,12 +1,12 @@
 import { GameMap, Tile, TileType, ControlPoint, MapSize, MAP_SIZES, Position } from '../types/game';
 
 const TILE_TEMPLATES: Record<TileType, Omit<Tile, 'resourceAmount'>> = {
-  grass: { type: 'grass', passable: true, movementCost: 1, ascii: '.', color: '#2d4a2d', bgColor: '#1a2e1a' },
-  dirt: { type: 'dirt', passable: true, movementCost: 1.2, ascii: ',', color: '#4a3d2d', bgColor: '#2e241a' },
-  rock: { type: 'rock', passable: false, movementCost: 999, ascii: '#', color: '#555566', bgColor: '#2a2a33' },
+  grass: { type: 'grass', passable: true, movementCost: 1, ascii: '·', color: '#2d4a2d', bgColor: '#1a2e1a' },
+  dirt: { type: 'dirt', passable: true, movementCost: 1.2, ascii: '░', color: '#4a3d2d', bgColor: '#2e241a' },
+  rock: { type: 'rock', passable: false, movementCost: 999, ascii: '▓', color: '#555566', bgColor: '#2a2a33' },
   forest: { type: 'forest', passable: true, movementCost: 2, ascii: '♣', color: '#1a5a1a', bgColor: '#0e2e0e' },
-  crystal: { type: 'crystal', passable: true, movementCost: 1, ascii: '◆', color: '#60d0ff', bgColor: '#1a2e3a' },
-  water: { type: 'water', passable: false, movementCost: 999, ascii: '~', color: '#2266aa', bgColor: '#0a1a3a' },
+  crystal: { type: 'crystal', passable: true, movementCost: 1, ascii: '◆', color: '#60d0ff', bgColor: '#0e1e2e' },
+  water: { type: 'water', passable: false, movementCost: 999, ascii: '≈', color: '#2266aa', bgColor: '#0a1a3a' },
   ruins: { type: 'ruins', passable: true, movementCost: 1.5, ascii: '⌂', color: '#6a5a4a', bgColor: '#2a2218' },
   control_point: { type: 'control_point', passable: true, movementCost: 1, ascii: '◎', color: '#ffdd44', bgColor: '#3a3a1a' },
 };
@@ -75,15 +75,21 @@ export function generateMap(mapSize: MapSize, seed?: number): GameMap {
 
   const numCrystals = mapSize === 'small' ? 6 : mapSize === 'medium' ? 10 : 14;
   for (let i = 0; i < numCrystals; i++) {
-    let cx = Math.floor(rand() * (config.width - 10)) + 5;
-    let cy = Math.floor(rand() * (config.height - 10)) + 5;
+    let cx = Math.floor(rand() * (config.width - 12)) + 6;
+    let cy = Math.floor(rand() * (config.height - 12)) + 6;
 
     const nearCorner = corners.some(c => Math.abs(c.x - cx) < 8 && Math.abs(c.y - cy) < 8);
     if (nearCorner) { cx += 10; cy += 10; }
 
-    if (cx >= 0 && cx < config.width && cy >= 0 && cy < config.height) {
-      const template = TILE_TEMPLATES['crystal'];
-      tiles[cy][cx] = { ...template, resourceAmount: 100 };
+    const template = TILE_TEMPLATES['crystal'];
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        const tx = cx + dx;
+        const ty = cy + dy;
+        if (tx >= 0 && tx < config.width && ty >= 0 && ty < config.height) {
+          tiles[ty][tx] = { ...template, resourceAmount: 50 };
+        }
+      }
     }
   }
 

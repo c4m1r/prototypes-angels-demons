@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { GameState, Position, Unit, Building, MAP_SIZES, MapSize, CombatEvent } from '../types/game';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
-import { isBuilder } from '../engine/gameEngine';
+import { isBuilder, isTileVisible } from '../engine/gameEngine';
 
 interface GameCanvasProps {
   gameState: GameState;
@@ -15,6 +15,13 @@ interface GameCanvasProps {
   onMouseUp: (screenPos: Position, worldPos: Position) => void;
   onRightClick: (worldPos: Position) => void;
 }
+
+const CRYSTAL_SMALL = [
+  ' ╱◆╲ ',
+  '╱◆◆◆╲',
+  '╲◆◆◆╱',
+  ' ╲◆╱ ',
+];
 
 export default function GameCanvas({
   gameState,
@@ -69,30 +76,46 @@ export default function GameCanvas({
         const screenX = tx * tileSize - camera.x;
         const screenY = ty * tileSize - camera.y;
 
+        const revealed = gameState.revealedTiles[ty]?.[tx];
+        const visible = isTileVisible(gameState, tx, ty);
+
+        if (!revealed) {
+          ctx.fillStyle = '#050810';
+          ctx.fillRect(screenX, screenY, tileSize, tileSize);
+          continue;
+        }
+
         ctx.fillStyle = tile.bgColor;
         ctx.fillRect(screenX, screenY, tileSize, tileSize);
 
-        ctx.fillStyle = tile.color;
-        ctx.font = `${tileSize * 0.6}px monospace`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(tile.ascii, screenX + tileSize / 2, screenY + tileSize / 2);
-
         if (tile.type === 'crystal') {
-          ctx.shadowColor = '#60d0ff';
-          ctx.shadowBlur = 10;
-          ctx.fillStyle = '#60d0ff';
-          ctx.font = `bold ${tileSize * 0.7}px monospace`;
+          drawCrystalTile(ctx, screenX, screenY, tileSize, visible);
+        } else {
+          ctx.fillStyle = visible ? tile.color : `${tile.color}44`;
+          ctx.font = `${tileSize * 0.6}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
           ctx.fillText(tile.ascii, screenX + tileSize / 2, screenY + tileSize / 2);
-          ctx.shadowBlur = 0;
+        }
+
+        if (!visible) {
+          ctx.fillStyle = 'rgba(5, 8, 16, 0.55)';
+          ctx.fillRect(screenX, screenY, tileSize, tileSize);
         }
       }
     }
 
     gameState.map.controlPoints.forEach(cp => {
+      const cpTileX = cp.position.x;
+      const cpTileY = cp.position.y;
+      const visible = isTileVisible(gameState, cpTileX, cpTileY);
+      if (!visible && !gameState.revealedTiles[cpTileY]?.[cpTileX]) return;
+
       const screenX = cp.position.x * tileSize - camera.x + tileSize / 2;
       const screenY = cp.position.y * tileSize - camera.y + tileSize / 2;
       const ownerColor = cp.owner !== null ? gameState.teams[cp.owner]?.color : '#ffdd44';
+
+      ctx.globalAlpha = visible ? 1 : 0.4;
 
       ctx.shadowColor = ownerColor;
       ctx.shadowBlur = 14;
@@ -121,14 +144,22 @@ export default function GameCanvas({
           ctx.stroke();
         }
       }
+
+      ctx.globalAlpha = 1;
     });
 
     const allObjects: Array<{ building?: Building; unit?: Unit; teamId: number; order: number }> = [];
     gameState.teams.forEach(team => {
       team.buildings.forEach(building => {
+        const btx = Math.floor(building.position.x / tileSize);
+        const bty = Math.floor(building.position.y / tileSize);
+        if (!isTileVisible(gameState, btx, bty)) return;
         allObjects.push({ building, teamId: team.id, order: building.position.y + building.position.x });
       });
       team.units.forEach(unit => {
+        const utx = Math.floor(unit.position.x / tileSize);
+        const uty = Math.floor(unit.position.y / tileSize);
+        if (!isTileVisible(gameState, utx, uty)) return;
         allObjects.push({ unit, teamId: team.id, order: unit.position.y + unit.position.x });
       });
     });
@@ -141,6 +172,35 @@ export default function GameCanvas({
       } else if (obj.unit) {
         drawUnit(ctx, obj.unit, camera, team.color, team.glowColor, now);
       }
+    });
+
+    gameState.deathMarkers.forEach(dm => {
+      const age = (now - dm.timestamp) / 60000;
+      if (age >= 1) return;
+
+      const alpha = 1 - age;
+      const screenX = dm.position.x - camera.x;
+      const screenY = dm.position.y - camera.y;
+
+      const dtx = Math.floor(dm.position.x / tileSize);
+      const dty = Math.floor(dm.position.y / tileSize);
+      if (!gameState.revealedTiles[dty]?.[dtx]) return;
+
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = '#ff2222';
+      ctx.lineWidth = dm.isBuilding ? 4 : 2;
+      const size = dm.isBuilding ? 20 : 12;
+
+      ctx.beginPath();
+      ctx.moveTo(screenX - size, screenY - size);
+      ctx.lineTo(screenX + size, screenY + size);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(screenX + size, screenY - size);
+      ctx.lineTo(screenX - size, screenY + size);
+      ctx.stroke();
+
+      ctx.globalAlpha = 1;
     });
 
     const buildRadius = 160;
@@ -172,6 +232,40 @@ export default function GameCanvas({
       if (now - event.timestamp < 1200) {
         drawCombatEvent(ctx, event, camera, now);
       }
+    });
+
+    gameState.speechBubbles.forEach(bubble => {
+      if (now - bubble.timestamp > 3000) return;
+      if (!bubble.text) return;
+
+      const age = (now - bubble.timestamp) / 3000;
+      const alpha = age < 0.1 ? age / 0.1 : age > 0.7 ? 1 - (age - 0.7) / 0.3 : 1;
+
+      const screenX = bubble.position.x - camera.x;
+      const screenY = bubble.position.y - camera.y - 40;
+
+      ctx.globalAlpha = alpha * 0.85;
+
+      ctx.font = '10px monospace';
+      const textWidth = ctx.measureText(bubble.text).width;
+      const padding = 6;
+      const boxWidth = textWidth + padding * 2;
+      const boxHeight = 18;
+
+      ctx.fillStyle = 'rgba(10, 14, 26, 0.9)';
+      ctx.strokeStyle = 'rgba(200, 200, 200, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(screenX - boxWidth / 2, screenY - boxHeight / 2, boxWidth, boxHeight, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#e0e0e0';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(bubble.text, screenX, screenY);
+
+      ctx.globalAlpha = 1;
     });
 
     gameState.teams.forEach(team => {
@@ -239,6 +333,54 @@ export default function GameCanvas({
     ctx.lineWidth = 2;
     ctx.strokeRect(-camera.x, -camera.y, mapPixelW, mapPixelH);
   }, [gameState, camera, mapSize, canvasSize]);
+
+  function drawCrystalTile(
+    ctx: CanvasRenderingContext2D,
+    screenX: number,
+    screenY: number,
+    tileSize: number,
+    visible: boolean
+  ) {
+    const art = CRYSTAL_SMALL;
+    const charSize = tileSize / 5;
+    const startX = screenX + tileSize / 2 - (art[0].length * charSize) / 2;
+    const startY = screenY + tileSize / 2 - (art.length * charSize) / 2;
+
+    ctx.shadowColor = '#60d0ff';
+    ctx.shadowBlur = visible ? 12 : 4;
+
+    for (let row = 0; row < art.length; row++) {
+      for (let col = 0; col < art[row].length; col++) {
+        const ch = art[row][col];
+        if (ch === ' ') continue;
+
+        const cx = startX + col * charSize + charSize / 2;
+        const cy = startY + row * charSize + charSize / 2;
+
+        if (ch === '◆') {
+          ctx.fillStyle = visible ? '#80e0ff' : '#406080';
+          ctx.font = `bold ${charSize * 1.2}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('◆', cx, cy);
+        } else {
+          ctx.strokeStyle = visible ? '#60d0ff' : '#304860';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          if (ch === '╱') {
+            ctx.moveTo(cx - charSize / 2, cy + charSize / 2);
+            ctx.lineTo(cx + charSize / 2, cy - charSize / 2);
+          } else if (ch === '╲') {
+            ctx.moveTo(cx - charSize / 2, cy - charSize / 2);
+            ctx.lineTo(cx + charSize / 2, cy + charSize / 2);
+          }
+          ctx.stroke();
+        }
+      }
+    }
+
+    ctx.shadowBlur = 0;
+  }
 
   function drawBuilding(
     ctx: CanvasRenderingContext2D,
