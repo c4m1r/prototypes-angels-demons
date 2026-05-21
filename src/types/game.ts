@@ -1,6 +1,8 @@
 export type FactionType = 'angels' | 'demons' | 'undead' | 'machines';
 export type MapSize = 'small' | 'medium' | 'large';
 export type Difficulty = 'easy' | 'normal' | 'hard';
+export type LevelUpStat = 'movementSpeed' | 'health' | 'damage' | 'attackSpeed' | 'mana' | 'range' | 'evasion';
+export type AIPersonality = 'turtle' | 'balanced' | 'rusher';
 
 export interface Position {
   x: number;
@@ -55,6 +57,11 @@ export interface Unit {
   level: number;
   experience: number;
   experienceToLevel: number;
+  path: Position[];
+  pathIndex: number;
+  lastAttackFlash: number;
+  pendingLevelUps: number;
+  abilities: Ability[];
 }
 
 export interface Building {
@@ -98,6 +105,7 @@ export interface Team {
   color: string;
   glowColor: string;
   defeated: boolean;
+  aiProfile: AIProfile;
 }
 
 export interface GameMap {
@@ -116,6 +124,17 @@ export interface GameState {
   gameStarted: boolean;
   difficulty: Difficulty;
   gameTime: number;
+  combatEvents: CombatEvent[];
+  gameOver: 'victory' | 'defeat' | null;
+}
+
+export interface CombatEvent {
+  id: string;
+  type: 'damage' | 'kill' | 'levelup' | 'capture';
+  position: Position;
+  value: number;
+  timestamp: number;
+  color: string;
 }
 
 export interface UnitConfig {
@@ -134,6 +153,7 @@ export interface UnitConfig {
   ascii: string;
   description: string;
   isHero: boolean;
+  abilities: AbilityConfig[];
 }
 
 export interface BuildingConfig {
@@ -167,6 +187,46 @@ export interface FactionConfig {
   techBuilding: BuildingType;
   buildings: BuildingType[];
   description: string;
+}
+
+export interface Ability {
+  id: string;
+  name: string;
+  manaCost: number;
+  cooldown: number;
+  lastUsed: number;
+  range: number;
+  effectType: 'damage' | 'heal' | 'buff' | 'aoe';
+  value: number;
+  description: string;
+  ascii: string;
+}
+
+export interface AbilityConfig {
+  id: string;
+  name: string;
+  manaCost: number;
+  cooldown: number;
+  range: number;
+  effectType: 'damage' | 'heal' | 'buff' | 'aoe';
+  value: number;
+  description: string;
+  ascii: string;
+}
+
+export interface AIProfile {
+  personality: AIPersonality;
+  difficulty: Difficulty;
+  attackInterval: number;
+  squadSize: number;
+  buildPriority: number;
+  capturePriority: number;
+  defensePriority: number;
+  economyRate: number;
+  lastAttackTime: number;
+  lastBuildTime: number;
+  lastCaptureTime: number;
+  targetPointIndex: number;
 }
 
 export const MAP_SIZES: Record<MapSize, { width: number; height: number; tileSize: number }> = {
@@ -237,3 +297,54 @@ export const FACTION_CONFIGS: Record<FactionType, FactionConfig> = {
     description: 'Техника, броня, механика',
   },
 };
+
+export const LEVEL_UP_STAT_NAMES: Record<LevelUpStat, string> = {
+  movementSpeed: 'Скорость',
+  health: 'Здоровье',
+  damage: 'Атака',
+  attackSpeed: 'Скор. атаки',
+  mana: 'Мана',
+  range: 'Дальность',
+  evasion: 'Уклонение',
+};
+
+export function getAIProfile(personality: AIPersonality, difficulty: Difficulty): AIProfile {
+  const diff = difficulty === 'easy' ? 0.6 : difficulty === 'normal' ? 1.0 : 1.5;
+
+  const base: Record<AIPersonality, Omit<AIProfile, 'personality' | 'difficulty' | 'lastAttackTime' | 'lastBuildTime' | 'lastCaptureTime' | 'targetPointIndex'>> = {
+    turtle: {
+      attackInterval: 45000 / diff,
+      squadSize: Math.floor(6 * diff),
+      buildPriority: 0.8,
+      capturePriority: 0.3,
+      defensePriority: 0.9,
+      economyRate: 1.2 * diff,
+    },
+    balanced: {
+      attackInterval: 30000 / diff,
+      squadSize: Math.floor(8 * diff),
+      buildPriority: 0.5,
+      capturePriority: 0.6,
+      defensePriority: 0.5,
+      economyRate: 1.0 * diff,
+    },
+    rusher: {
+      attackInterval: 15000 / diff,
+      squadSize: Math.floor(4 * diff),
+      buildPriority: 0.2,
+      capturePriority: 0.4,
+      defensePriority: 0.2,
+      economyRate: 0.8 * diff,
+    },
+  };
+
+  return {
+    personality,
+    difficulty,
+    ...base[personality],
+    lastAttackTime: 0,
+    lastBuildTime: 0,
+    lastCaptureTime: 0,
+    targetPointIndex: 0,
+  };
+}

@@ -1,4 +1,7 @@
-import { Building, Unit, UnitType, BuildingType, GameState, FACTION_CONFIGS } from '../types/game';
+import {
+  Building, Unit, UnitType, BuildingType, GameState, FACTION_CONFIGS,
+  LevelUpStat, LEVEL_UP_STAT_NAMES,
+} from '../types/game';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
 import { isBuilder } from '../engine/gameEngine';
@@ -10,6 +13,7 @@ interface GameUIProps {
   onProduceUnit: (building: Building, unitType: UnitType) => void;
   onBuildBuilding: (buildingType: BuildingType) => void;
   onAddToSquad: (unit: Unit) => void;
+  onLevelUp: (unit: Unit, stat: LevelUpStat) => void;
 }
 
 export default function GameUI({
@@ -19,6 +23,7 @@ export default function GameUI({
   onProduceUnit,
   onBuildBuilding,
   onAddToSquad,
+  onLevelUp,
 }: GameUIProps) {
   const playerTeam = gameState.teams[gameState.playerTeam];
   const factionConfig = FACTION_CONFIGS[playerTeam.faction];
@@ -117,10 +122,12 @@ export default function GameUI({
     return (
       <div className="bg-slate-800/90 border border-slate-600/50 rounded-lg p-3">
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-2xl" style={{ color: factionConfig.color }}>{config.ascii[1] || config.ascii[0]}</span>
+          <div className="w-10 h-10 flex items-center justify-center rounded border border-slate-600" style={{ backgroundColor: `${factionConfig.color}22` }}>
+            <span className="text-xl" style={{ color: factionConfig.color }}>{config.ascii[1] || config.ascii[0]}</span>
+          </div>
           <div>
-            <h3 className="text-base font-bold text-white">{config.name}</h3>
-            <div className="text-xs text-slate-400">{config.description}</div>
+            <h3 className="text-sm font-bold text-white">{config.name}</h3>
+            <div className="text-[10px] text-slate-400">{config.description}</div>
           </div>
         </div>
 
@@ -175,7 +182,7 @@ export default function GameUI({
                   <span className="flex items-center gap-1">
                     <span style={{ color: factionConfig.color }}>{unitConfig.ascii}</span>
                     <span>{unitConfig.name}</span>
-                    {unitConfig.isHero && <span className="text-yellow-400 text-[10px]">ГЕРОЙ</span>}
+                    {unitConfig.isHero && <span className="text-yellow-400 text-[10px] font-bold">ГЕРОЙ</span>}
                   </span>
                   <span className="text-yellow-400">{unitConfig.cost}</span>
                 </button>
@@ -199,24 +206,123 @@ export default function GameUI({
             <span className="text-2xl" style={{ color: factionConfig.color }}>{config.ascii}</span>
           </div>
           <div>
-            <h3 className="text-base font-bold text-white">
+            <h3 className="text-sm font-bold text-white">
               {config.name}
-              {unit.isHero && <span className="text-yellow-400 text-xs ml-1">ГЕРОЙ</span>}
+              {unit.isHero && <span className="text-yellow-400 text-[10px] ml-1 font-bold">ГЕРОЙ</span>}
             </h3>
             {unit.isHero && (
-              <div className="text-xs text-yellow-400">Ур. {unit.level} ({unit.experience}/{unit.experienceToLevel} XP)</div>
+              <div className="text-[10px] text-yellow-400">Ур. {unit.level} ({unit.experience}/{unit.experienceToLevel} XP)</div>
+            )}
+            {!unit.isHero && unit.level > 1 && (
+              <div className="text-[10px] text-slate-400">Ур. {unit.level}</div>
             )}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-300 mb-2">
-          <div>HP: {Math.floor(unit.health)}/{unit.maxHealth}</div>
-          <div>Урон: {Math.floor(unit.damage * unit.squadSize)}</div>
-          <div>Отряд: {unit.squadSize}/{unit.maxSquadSize}</div>
-          <div>Дальность: {unit.range}</div>
-          {unit.maxMana > 0 && <div>Мана: {Math.floor(unit.mana)}/{unit.maxMana}</div>}
-          <div>Уклонение: {Math.floor(unit.evasion * 100)}%</div>
+        <div className="mb-2">
+          <div className="flex justify-between text-xs text-slate-300 mb-1">
+            <span>HP</span>
+            <span>{Math.floor(unit.health)}/{unit.maxHealth}</span>
+          </div>
+          <div className="w-full bg-slate-700 rounded-full h-1.5">
+            <div
+              className="h-1.5 rounded-full transition-all"
+              style={{
+                width: `${(unit.health / unit.maxHealth) * 100}%`,
+                backgroundColor: unit.health / unit.maxHealth > 0.6 ? '#22dd22' : unit.health / unit.maxHealth > 0.3 ? '#ffdd00' : '#ff3333',
+              }}
+            />
+          </div>
         </div>
+
+        {unit.maxMana > 0 && (
+          <div className="mb-2">
+            <div className="flex justify-between text-xs text-slate-300 mb-1">
+              <span>Мана</span>
+              <span>{Math.floor(unit.mana)}/{unit.maxMana}</span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-1.5">
+              <div
+                className="bg-blue-500 h-1.5 rounded-full transition-all"
+                style={{ width: `${(unit.mana / unit.maxMana) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {unit.isHero && (
+          <div className="mb-2">
+            <div className="flex justify-between text-xs text-slate-300 mb-1">
+              <span>XP</span>
+              <span>{unit.experience}/{unit.experienceToLevel}</span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-1.5">
+              <div
+                className="bg-yellow-500 h-1.5 rounded-full transition-all"
+                style={{ width: `${(unit.experience / unit.experienceToLevel) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-slate-300 mb-2">
+          <div>Атака: {Math.floor(unit.damage * unit.squadSize)}</div>
+          <div>Дальность: {Math.floor(unit.range)}</div>
+          <div>Скор. атаки: {unit.attackSpeed.toFixed(1)}</div>
+          <div>Скорость: {Math.floor(unit.movementSpeed)}</div>
+          <div>Уклонение: {Math.floor(unit.evasion * 100)}%</div>
+          <div>Отряд: {unit.squadSize}/{unit.maxSquadSize}</div>
+        </div>
+
+        {unit.isHero && unit.abilities.length > 0 && (
+          <div className="mb-2 border-t border-slate-700/50 pt-2">
+            <div className="text-xs text-slate-400 mb-1">Способности:</div>
+            {unit.abilities.map(ability => {
+              const now = Date.now();
+              const onCooldown = now - ability.lastUsed < ability.cooldown;
+              const canUse = !onCooldown && unit.mana >= ability.manaCost;
+
+              return (
+                <div key={ability.id} className={`text-[10px] mb-1 p-1 rounded ${canUse ? 'bg-slate-700/50' : 'bg-slate-800/30'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <span style={{ color: canUse ? '#ff8800' : '#555' }}>{ability.ascii}</span>
+                      <span className={canUse ? 'text-white' : 'text-slate-500'}>{ability.name}</span>
+                    </span>
+                    <span className="text-blue-400">{ability.manaCost} м</span>
+                  </div>
+                  {onCooldown && (
+                    <div className="w-full bg-slate-700 rounded-full h-1 mt-1">
+                      <div
+                        className="bg-orange-500 h-1 rounded-full transition-all"
+                        style={{ width: `${((now - ability.lastUsed) / ability.cooldown) * 100}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {unit.pendingLevelUps > 0 && (
+          <div className="mb-2 border-t border-yellow-500/30 pt-2">
+            <div className="text-xs text-yellow-400 font-bold mb-1">
+              Level Up! ({unit.pendingLevelUps} очков)
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              {(Object.keys(LEVEL_UP_STAT_NAMES) as LevelUpStat[]).map(stat => (
+                <button
+                  key={stat}
+                  onClick={() => onLevelUp(unit, stat)}
+                  className="p-1.5 rounded text-[10px] bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-300 border border-yellow-500/30 transition-all"
+                >
+                  {LEVEL_UP_STAT_NAMES[stat]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {canAddToSquad && (
           <button
@@ -320,7 +426,8 @@ export default function GameUI({
           <div>ЛКМ - Выбор юнитов/зданий</div>
           <div>ПКМ - Движение / Атака</div>
           <div>СКМ / Alt+ЛКМ - Камера</div>
-          <div>Колесо - Прокрутка карты</div>
+          <div>Колесо / WASD - Прокрутка карты</div>
+          <div>ESC - Отмена строительства</div>
         </div>
       </div>
     </div>

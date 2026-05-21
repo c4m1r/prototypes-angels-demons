@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   GameState, FactionType, Position, Unit, Building, UnitType, BuildingType,
-  MapSize, Difficulty, MAP_SIZES,
+  MapSize, Difficulty, MAP_SIZES, LevelUpStat,
 } from '../types/game';
-import { initializeGame, updateGame, distance, isBuilder } from '../engine/gameEngine';
+import { initializeGame, updateGame, distance, isBuilder, applyLevelUp, getMapSizeFromState } from '../engine/gameEngine';
 import { updateAI } from '../engine/ai';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
+import { findPathWorld } from '../engine/pathfinding';
 import GameCanvas from './GameCanvas';
 import GameUI from './GameUI';
 
@@ -34,6 +35,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
   useEffect(() => {
     const interval = setInterval(() => {
       setGameState(prevState => {
+        if (prevState.gameOver) return prevState;
         let newState = updateGame(prevState, 100);
         newState = updateAI(newState);
         return newState;
@@ -84,23 +86,18 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     const isClick = Math.abs(mouseDownPos.x - worldPos.x) < 10 && Math.abs(mouseDownPos.y - worldPos.y) < 10;
 
     const selectedUnitIds: string[] = [];
-    const selectedBuildingIds: string[] = [];
 
     if (isClick) {
       let clickedUnit: Unit | undefined;
       let clickedBuilding: Building | undefined;
 
       playerTeam.units.forEach(unit => {
-        if (distance(unit.position, worldPos) < 25) {
-          clickedUnit = unit;
-        }
+        if (distance(unit.position, worldPos) < 25) clickedUnit = unit;
       });
 
       if (!clickedUnit) {
         playerTeam.buildings.forEach(building => {
-          if (distance(building.position, worldPos) < 50) {
-            clickedBuilding = building;
-          }
+          if (distance(building.position, worldPos) < 50) clickedBuilding = building;
         });
       }
 
@@ -112,7 +109,6 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
         selectedUnitIds.push(clickedUnit.id);
       } else if (clickedBuilding) {
         clickedBuilding.selected = true;
-        selectedBuildingIds.push(clickedBuilding.id);
       }
     } else {
       playerTeam.units.forEach(unit => {
@@ -127,7 +123,6 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
           const inBox = building.position.x >= minX && building.position.x <= maxX &&
                         building.position.y >= minY && building.position.y <= maxY;
           building.selected = inBox;
-          if (inBox) selectedBuildingIds.push(building.id);
         });
       } else {
         playerTeam.buildings.forEach(b => b.selected = false);
@@ -201,6 +196,8 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
         unit.targetUnit = targetUnit!.id;
         unit.targetBuilding = undefined;
         unit.targetPosition = undefined;
+        unit.path = [];
+        unit.pathIndex = 0;
       });
     } else if (targetBuilding) {
       selectedUnits.forEach(unit => {
@@ -214,11 +211,24 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
           unit.targetUnit = undefined;
           unit.targetPosition = undefined;
         }
+        unit.path = [];
+        unit.pathIndex = 0;
       });
     } else {
       selectedUnits.forEach(unit => {
-        unit.targetPosition = worldPos;
-        unit.moving = true;
+        const currentMapSize = getMapSizeFromState(gameState);
+        const path = findPathWorld(gameState.map, unit.position, worldPos, currentMapSize);
+        if (path.length > 1) {
+          unit.path = path.slice(1);
+          unit.pathIndex = 0;
+          unit.moving = true;
+          unit.targetPosition = worldPos;
+        } else {
+          unit.targetPosition = worldPos;
+          unit.moving = true;
+          unit.path = [];
+          unit.pathIndex = 0;
+        }
         unit.targetUnit = undefined;
         unit.targetBuilding = undefined;
       });
@@ -257,6 +267,25 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     }
   }, [gameState]);
 
+  const handleLevelUp = useCallback((unit: Unit, stat: LevelUpStat) => {
+    if (applyLevelUp(unit, stat)) {
+      setGameState({ ...gameState });
+    }
+  }, [gameState]);
+
+  const handleRestart = useCallback(() => {
+    setGameState(initializeGame(faction, mapSize, difficulty));
+    setBuildMode(null);
+    const newGame = initializeGame(faction, mapSize, difficulty);
+    const playerTeam = newGame.teams[newGame.playerTeam];
+    if (playerTeam?.buildings[0]) {
+      setCamera({
+        x: playerTeam.buildings[0].position.x - 400,
+        y: playerTeam.buildings[0].position.y - 300,
+      });
+    }
+  }, [faction, mapSize, difficulty]);
+
   const playerTeam = gameState.teams[gameState.playerTeam];
   const selectedUnits = playerTeam.units.filter(u => u.selected);
   const selectedBuildings = playerTeam.buildings.filter(b => b.selected);
@@ -264,7 +293,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col">
       <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden relative">
           <GameCanvas
             gameState={gameState}
             mapSize={mapSize}
@@ -280,6 +309,29 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
               Строительство: {BUILDING_CONFIGS[buildMode].name} -- ПКМ для размещения, ESC для отмены
             </div>
           )}
+          {gameState.gameOver && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-50">
+              <div className="bg-slate-800 border-2 rounded-xl p-8 text-center shadow-2xl max-w-md" style={{ borderColor: gameState.gameOver === 'victory' ? '#22dd22' : '#ff3333' }}>
+                <h2 className="text-4xl font-bold mb-4" style={{ color: gameState.gameOver === 'victory' ? '#22dd22' : '#ff3333' }}>
+                  {gameState.gameOver === 'victory' ? 'ПОБЕДА' : 'ПОРАЖЕНИЕ'}
+                </h2>
+                <p className="text-slate-300 mb-6">
+                  {gameState.gameOver === 'victory'
+                    ? 'Все вражеские базы уничтожены!'
+                    : 'Ваша база уничтожена...'}
+                </p>
+                <div className="text-sm text-slate-400 mb-6">
+                  Время: {Math.floor(gameState.gameTime / 1000)}с | Юнитов: {playerTeam.units.length} | Зданий: {playerTeam.buildings.length}
+                </div>
+                <button
+                  onClick={handleRestart}
+                  className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold transition-all border border-slate-500"
+                >
+                  Начать заново
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="overflow-y-auto max-h-screen p-2 bg-slate-900/50 border-l border-slate-700/50">
@@ -290,6 +342,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
             onProduceUnit={handleProduceUnit}
             onBuildBuilding={handleBuildBuilding}
             onAddToSquad={handleAddToSquad}
+            onLevelUp={handleLevelUp}
           />
         </div>
       </div>
