@@ -153,7 +153,9 @@ export interface UnitConfig {
   ascii: string;
   description: string;
   isHero: boolean;
+  isMelee: boolean;
   abilities: AbilityConfig[];
+  portrait: string[];
 }
 
 export interface BuildingConfig {

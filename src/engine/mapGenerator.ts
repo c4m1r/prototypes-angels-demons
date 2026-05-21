@@ -28,6 +28,12 @@ export function generateMap(mapSize: MapSize, seed?: number): GameMap {
   for (let y = 0; y < config.height; y++) {
     tiles[y] = [];
     for (let x = 0; x < config.width; x++) {
+      if (x === 0 || y === 0 || x === config.width - 1 || y === config.height - 1) {
+        const template = TILE_TEMPLATES['rock'];
+        tiles[y][x] = { ...template, resourceAmount: 0 };
+        continue;
+      }
+
       const r = rand();
       let tileType: TileType;
 

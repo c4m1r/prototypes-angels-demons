@@ -146,6 +146,46 @@ export default function GameCanvas({
       }
     });
 
+    gameState.teams.forEach(team => {
+      team.units.forEach(unit => {
+        if (now - unit.lastAttackFlash < 200 && !UNIT_CONFIGS[unit.type].isMelee) {
+          if (unit.targetUnit) {
+            const target = findUnitById(gameState, unit.targetUnit);
+            if (target) {
+              const sx = unit.position.x - camera.x;
+              const sy = unit.position.y - camera.y;
+              const tx = target.position.x - camera.x;
+              const ty = target.position.y - camera.y;
+              ctx.strokeStyle = team.color;
+              ctx.lineWidth = 2;
+              ctx.globalAlpha = 0.6;
+              ctx.beginPath();
+              ctx.moveTo(sx, sy);
+              ctx.lineTo(tx, ty);
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+            }
+          } else if (unit.targetBuilding) {
+            const target = findBuildingById(gameState, unit.targetBuilding);
+            if (target) {
+              const sx = unit.position.x - camera.x;
+              const sy = unit.position.y - camera.y;
+              const tx = target.position.x - camera.x;
+              const ty = target.position.y - camera.y;
+              ctx.strokeStyle = team.color;
+              ctx.lineWidth = 2;
+              ctx.globalAlpha = 0.6;
+              ctx.beginPath();
+              ctx.moveTo(sx, sy);
+              ctx.lineTo(tx, ty);
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+            }
+          }
+        }
+      });
+    });
+
     if (gameState.selectionBox) {
       const start = { x: gameState.selectionBox.start.x - camera.x, y: gameState.selectionBox.start.y - camera.y };
       const end = { x: gameState.selectionBox.end.x - camera.x, y: gameState.selectionBox.end.y - camera.y };
@@ -229,6 +269,7 @@ export default function GameCanvas({
     const screenPos = { x: unit.position.x - camera.x, y: unit.position.y - camera.y };
 
     const isAttacking = now - unit.lastAttackFlash < 300;
+    const isRanged = !config.isMelee;
     const radius = 14;
 
     if (unit.selected) {
@@ -237,11 +278,11 @@ export default function GameCanvas({
     }
 
     if (isAttacking) {
-      ctx.shadowColor = '#ff8800';
+      ctx.shadowColor = isRanged ? '#ff4400' : '#ff8800';
       ctx.shadowBlur = 20;
     }
 
-    ctx.fillStyle = isAttacking ? '#ffcc00' : unit.selected ? '#ffff00' : teamColor;
+    ctx.fillStyle = isAttacking ? (isRanged ? '#ff6600' : '#ffcc00') : unit.selected ? '#ffff00' : teamColor;
     ctx.globalAlpha = 0.9;
     ctx.beginPath();
     ctx.arc(screenPos.x, screenPos.y, radius, 0, Math.PI * 2);
@@ -254,6 +295,14 @@ export default function GameCanvas({
     ctx.arc(screenPos.x, screenPos.y, radius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.shadowBlur = 0;
+
+    if (isRanged) {
+      ctx.strokeStyle = `${teamColor}66`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(screenPos.x, screenPos.y, radius + 2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${radius}px monospace`;
@@ -375,6 +424,22 @@ export default function GameCanvas({
     }
 
     ctx.globalAlpha = 1;
+  }
+
+  function findUnitById(state: GameState, unitId: string): Unit | undefined {
+    for (const team of state.teams) {
+      const unit = team.units.find(u => u.id === unitId);
+      if (unit) return unit;
+    }
+    return undefined;
+  }
+
+  function findBuildingById(state: GameState, buildingId: string): Building | undefined {
+    for (const team of state.teams) {
+      const building = team.buildings.find(b => b.id === buildingId);
+      if (building) return building;
+    }
+    return undefined;
   }
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   GameState, FactionType, Position, Unit, Building, UnitType, BuildingType,
-  MapSize, Difficulty, MAP_SIZES, LevelUpStat,
+  MapSize, Difficulty, MAP_SIZES, LevelUpStat, FACTION_CONFIGS,
 } from '../types/game';
 import { initializeGame, updateGame, distance, isBuilder, applyLevelUp, getMapSizeFromState } from '../engine/gameEngine';
 import { updateAI } from '../engine/ai';
@@ -17,20 +17,22 @@ interface GameProps {
   difficulty: Difficulty;
 }
 
+function getInitialCamera(gameState: GameState): Position {
+  const playerTeam = gameState.teams[gameState.playerTeam];
+  if (playerTeam?.buildings[0]) {
+    return {
+      x: playerTeam.buildings[0].position.x - 400,
+      y: playerTeam.buildings[0].position.y - 300,
+    };
+  }
+  return { x: 0, y: 0 };
+}
+
 export default function Game({ faction, mapSize, difficulty }: GameProps) {
   const [gameState, setGameState] = useState<GameState>(() => initializeGame(faction, mapSize, difficulty));
   const [mouseDownPos, setMouseDownPos] = useState<Position | null>(null);
   const [buildMode, setBuildMode] = useState<BuildingType | null>(null);
-  const [camera, setCamera] = useState<Position>(() => {
-    const playerTeam = gameState.teams[gameState.playerTeam];
-    if (playerTeam?.buildings[0]) {
-      return {
-        x: playerTeam.buildings[0].position.x - 400,
-        y: playerTeam.buildings[0].position.y - 300,
-      };
-    }
-    return { x: 0, y: 0 };
-  });
+  const [camera, setCamera] = useState<Position>(() => getInitialCamera(gameState));
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -44,9 +46,30 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     return () => clearInterval(interval);
   }, []);
 
+  const centerOnMainBuilding = useCallback(() => {
+    setGameState(prev => {
+      const playerTeam = prev.teams[prev.playerTeam];
+      const mainBuilding = playerTeam.buildings.find(b => b.type === FACTION_CONFIGS[playerTeam.faction].mainBuilding);
+      if (mainBuilding) {
+        setCamera({
+          x: mainBuilding.position.x - 400,
+          y: mainBuilding.position.y - 300,
+        });
+        playerTeam.units.forEach(u => u.selected = false);
+        playerTeam.buildings.forEach(b => b.selected = false);
+        mainBuilding.selected = true;
+      }
+      return prev;
+    });
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setBuildMode(null);
+      if (e.key === ' ') {
+        e.preventDefault();
+        centerOnMainBuilding();
+      }
       const speed = 30;
       if (e.key === 'ArrowLeft' || e.key === 'a') setCamera(p => ({ ...p, x: p.x - speed }));
       if (e.key === 'ArrowRight' || e.key === 'd') setCamera(p => ({ ...p, x: p.x + speed }));
@@ -55,7 +78,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [centerOnMainBuilding]);
 
   const handleMouseDown = useCallback((_screenPos: Position, worldPos: Position) => {
     setMouseDownPos(worldPos);
@@ -138,39 +161,64 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     setMouseDownPos(null);
   }, [mouseDownPos, gameState.playerTeam, gameState.teams]);
 
+  const isWithinMapBounds = useCallback((worldPos: Position): boolean => {
+    const tileSize = MAP_SIZES[mapSize].tileSize;
+    const margin = tileSize * 2;
+    const mapPixelW = gameState.map.width * tileSize;
+    const mapPixelH = gameState.map.height * tileSize;
+    return worldPos.x >= margin && worldPos.x <= mapPixelW - margin &&
+           worldPos.y >= margin && worldPos.y <= mapPixelH - margin;
+  }, [mapSize, gameState.map]);
+
   const handleRightClick = useCallback((worldPos: Position) => {
     const playerTeam = gameState.teams[gameState.playerTeam];
 
     if (buildMode) {
       const config = BUILDING_CONFIGS[buildMode];
       const tileSize = MAP_SIZES[mapSize].tileSize;
-      const tileX = Math.floor(worldPos.x / tileSize);
-      const tileY = Math.floor(worldPos.y / tileSize);
 
-      if (tileX >= 0 && tileX < gameState.map.width && tileY >= 0 && tileY < gameState.map.height) {
-        const tile = gameState.map.tiles[tileY][tileX];
-        if (tile.passable && playerTeam.resources >= config.cost) {
-          const newBuilding: Building = {
-            id: `building-${gameState.playerTeam}-${Date.now()}`,
-            type: buildMode,
-            faction: playerTeam.faction,
-            teamId: playerTeam.id,
-            position: worldPos,
-            health: config.health,
-            maxHealth: config.health,
-            selected: false,
-            productionProgress: 0,
-            productionTime: 0,
-            isTurret: config.isTurret,
-            turretRange: config.turretRange,
-            turretDamage: config.turretDamage,
-            turretLastAttack: 0,
-          };
+      const selectedBuilders = playerTeam.units.filter(u => u.selected && isBuilder(u.type));
+      let buildPos = worldPos;
 
-          playerTeam.buildings.push(newBuilding);
-          playerTeam.resources -= config.cost;
-          setGameState({ ...gameState });
-        }
+      if (selectedBuilders.length > 0) {
+        const builder = selectedBuilders[0];
+        const angle = Math.random() * Math.PI * 2;
+        buildPos = {
+          x: builder.position.x + Math.cos(angle) * 80,
+          y: builder.position.y + Math.sin(angle) * 80,
+        };
+      }
+
+      const buildTileX = Math.floor(buildPos.x / tileSize);
+      const buildTileY = Math.floor(buildPos.y / tileSize);
+
+      if (
+        buildTileX >= 1 && buildTileX < gameState.map.width - 1 &&
+        buildTileY >= 1 && buildTileY < gameState.map.height - 1 &&
+        isWithinMapBounds(buildPos) &&
+        gameState.map.tiles[buildTileY]?.[buildTileX]?.passable &&
+        playerTeam.resources >= config.cost
+      ) {
+        const newBuilding: Building = {
+          id: `building-${gameState.playerTeam}-${Date.now()}`,
+          type: buildMode,
+          faction: playerTeam.faction,
+          teamId: playerTeam.id,
+          position: buildPos,
+          health: config.health,
+          maxHealth: config.health,
+          selected: false,
+          productionProgress: 0,
+          productionTime: 0,
+          isTurret: config.isTurret,
+          turretRange: config.turretRange,
+          turretDamage: config.turretDamage,
+          turretLastAttack: 0,
+        };
+
+        playerTeam.buildings.push(newBuilding);
+        playerTeam.resources -= config.cost;
+        setGameState({ ...gameState });
       }
       setBuildMode(null);
       return;
@@ -235,7 +283,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     }
 
     setGameState({ ...gameState });
-  }, [gameState, buildMode, mapSize]);
+  }, [gameState, buildMode, mapSize, isWithinMapBounds]);
 
   const handleProduceUnit = useCallback((building: Building, unitType: UnitType) => {
     const playerTeam = gameState.teams[gameState.playerTeam];
@@ -274,16 +322,10 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
   }, [gameState]);
 
   const handleRestart = useCallback(() => {
-    setGameState(initializeGame(faction, mapSize, difficulty));
-    setBuildMode(null);
     const newGame = initializeGame(faction, mapSize, difficulty);
-    const playerTeam = newGame.teams[newGame.playerTeam];
-    if (playerTeam?.buildings[0]) {
-      setCamera({
-        x: playerTeam.buildings[0].position.x - 400,
-        y: playerTeam.buildings[0].position.y - 300,
-      });
-    }
+    setGameState(newGame);
+    setBuildMode(null);
+    setCamera(getInitialCamera(newGame));
   }, [faction, mapSize, difficulty]);
 
   const playerTeam = gameState.teams[gameState.playerTeam];
@@ -306,7 +348,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
           />
           {buildMode && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-yellow-600/90 text-white rounded-lg text-sm shadow-lg">
-              Строительство: {BUILDING_CONFIGS[buildMode].name} -- ПКМ для размещения, ESC для отмены
+              Строительство: {BUILDING_CONFIGS[buildMode].name} -- ПКМ рядом со строителем, ESC для отмены
             </div>
           )}
           {gameState.gameOver && (

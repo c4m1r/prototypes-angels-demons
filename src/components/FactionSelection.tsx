@@ -30,7 +30,18 @@ export default function FactionSelection({ onSelectSettings }: FactionSelectionP
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center relative">
+      <div className="absolute bottom-4 left-4 text-xs text-slate-600">
+        ver.0.4.4 by{' '}
+        <a
+          href="https://c4m1r.github.io"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-slate-400 hover:text-slate-200 underline transition-colors"
+        >
+          c4m1r.github.io
+        </a>
+      </div>
       <div className="max-w-5xl w-full mx-4">
         <div className="bg-slate-800/60 backdrop-blur border border-slate-700/50 rounded-xl p-8 shadow-2xl">
           <h1 className="text-4xl font-bold text-center mb-2 text-slate-100 tracking-wide">

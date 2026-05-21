@@ -390,6 +390,49 @@ export default function GameUI({
     </div>
   );
 
+  const renderPortraitPanel = () => {
+    const selected = selectedUnits[0] || selectedBuildings[0];
+    if (!selected) return null;
+
+    const isUnit = 'squadSize' in selected;
+    const config = isUnit ? UNIT_CONFIGS[(selected as Unit).type] : BUILDING_CONFIGS[(selected as Building).type];
+    const portrait = isUnit ? (config as typeof UNIT_CONFIGS[UnitType]).portrait : (config as typeof BUILDING_CONFIGS[BuildingType]).ascii;
+    const name = config.name;
+    const typeLabel = isUnit
+      ? ((selected as Unit).isHero ? 'Герой' : (config as typeof UNIT_CONFIGS[UnitType]).isMelee ? 'Ближний бой' : 'Дальний бой')
+      : 'Здание';
+
+    return (
+      <div className="bg-slate-900/90 border border-slate-700/50 rounded-lg p-3">
+        <div className="flex gap-3">
+          <div
+            className="w-24 h-24 flex flex-col items-center justify-center rounded border-2 shrink-0"
+            style={{
+              borderColor: factionConfig.color,
+              backgroundColor: `${factionConfig.color}11`,
+              boxShadow: `0 0 12px ${factionConfig.color}33`,
+            }}
+          >
+            {portrait.map((line, i) => (
+              <div key={i} className="font-mono text-xs leading-tight whitespace-pre" style={{ color: factionConfig.glowColor }}>
+                {line}
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-col justify-center min-w-0">
+            <div className="text-sm font-bold text-white truncate">{name}</div>
+            <div className="text-[10px] text-slate-400">{typeLabel}</div>
+            {isUnit && (
+              <div className="text-[10px] text-slate-500 mt-1">
+                Ур. {(selected as Unit).level}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const hasBuilders = selectedUnits.some(u => isBuilder(u.type));
 
   return (
@@ -421,12 +464,15 @@ export default function GameUI({
 
       {hasBuilders && renderBuilderPanel()}
 
+      {renderPortraitPanel()}
+
       <div className="bg-slate-800/50 border border-slate-700/30 rounded-lg p-2">
         <div className="text-[10px] text-slate-500 space-y-0.5">
           <div>ЛКМ - Выбор юнитов/зданий</div>
           <div>ПКМ - Движение / Атака</div>
           <div>СКМ / Alt+ЛКМ - Камера</div>
           <div>Колесо / WASD - Прокрутка карты</div>
+          <div>Space - Центр на базе</div>
           <div>ESC - Отмена строительства</div>
         </div>
       </div>
