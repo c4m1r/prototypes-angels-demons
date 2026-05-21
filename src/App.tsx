@@ -1,16 +1,22 @@
 import { useState } from 'react';
-import { FactionType } from './types/game';
+import { FactionType, MapSize, Difficulty } from './types/game';
 import FactionSelection from './components/FactionSelection';
 import Game from './components/Game';
 
-function App() {
-  const [selectedFaction, setSelectedFaction] = useState<FactionType | null>(null);
+interface GameSettings {
+  faction: FactionType;
+  mapSize: MapSize;
+  difficulty: Difficulty;
+}
 
-  if (!selectedFaction) {
-    return <FactionSelection onSelectFaction={setSelectedFaction} />;
+function App() {
+  const [settings, setSettings] = useState<GameSettings | null>(null);
+
+  if (!settings) {
+    return <FactionSelection onSelectSettings={setSettings} />;
   }
 
-  return <Game faction={selectedFaction} />;
+  return <Game faction={settings.faction} mapSize={settings.mapSize} difficulty={settings.difficulty} />;
 }
 
 export default App;

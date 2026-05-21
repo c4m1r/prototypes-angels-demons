@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { GameState, FactionType, Position, Unit, Building, UnitType, BuildingType } from '../types/game';
-import { initializeGame, updateGame, distance } from '../engine/gameEngine';
+import {
+  GameState, FactionType, Position, Unit, Building, UnitType, BuildingType,
+  MapSize, Difficulty, MAP_SIZES,
+} from '../types/game';
+import { initializeGame, updateGame, distance, isBuilder } from '../engine/gameEngine';
 import { updateAI } from '../engine/ai';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
@@ -9,12 +12,24 @@ import GameUI from './GameUI';
 
 interface GameProps {
   faction: FactionType;
+  mapSize: MapSize;
+  difficulty: Difficulty;
 }
 
-export default function Game({ faction }: GameProps) {
-  const [gameState, setGameState] = useState<GameState>(() => initializeGame(faction));
+export default function Game({ faction, mapSize, difficulty }: GameProps) {
+  const [gameState, setGameState] = useState<GameState>(() => initializeGame(faction, mapSize, difficulty));
   const [mouseDownPos, setMouseDownPos] = useState<Position | null>(null);
   const [buildMode, setBuildMode] = useState<BuildingType | null>(null);
+  const [camera, setCamera] = useState<Position>(() => {
+    const playerTeam = gameState.teams[gameState.playerTeam];
+    if (playerTeam?.buildings[0]) {
+      return {
+        x: playerTeam.buildings[0].position.x - 400,
+        y: playerTeam.buildings[0].position.y - 300,
+      };
+    }
+    return { x: 0, y: 0 };
+  });
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -24,65 +39,99 @@ export default function Game({ faction }: GameProps) {
         return newState;
       });
     }, 100);
-
     return () => clearInterval(interval);
   }, []);
 
-  const handleMouseDown = useCallback((pos: Position) => {
-    setMouseDownPos(pos);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setBuildMode(null);
+      const speed = 30;
+      if (e.key === 'ArrowLeft' || e.key === 'a') setCamera(p => ({ ...p, x: p.x - speed }));
+      if (e.key === 'ArrowRight' || e.key === 'd') setCamera(p => ({ ...p, x: p.x + speed }));
+      if (e.key === 'ArrowUp' || e.key === 'w') setCamera(p => ({ ...p, y: p.y - speed }));
+      if (e.key === 'ArrowDown' || e.key === 's') setCamera(p => ({ ...p, y: p.y + speed }));
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleMouseDown = useCallback((_screenPos: Position, worldPos: Position) => {
+    setMouseDownPos(worldPos);
     setGameState(prev => ({
       ...prev,
-      selectionBox: { start: pos, end: pos },
+      selectionBox: { start: worldPos, end: worldPos },
     }));
   }, []);
 
-  const handleMouseMove = useCallback((pos: Position) => {
+  const handleMouseMove = useCallback((_screenPos: Position, worldPos: Position) => {
     if (mouseDownPos) {
       setGameState(prev => ({
         ...prev,
-        selectionBox: { start: mouseDownPos, end: pos },
+        selectionBox: { start: mouseDownPos, end: worldPos },
       }));
     }
   }, [mouseDownPos]);
 
-  const handleMouseUp = useCallback((pos: Position) => {
+  const handleMouseUp = useCallback((_screenPos: Position, worldPos: Position) => {
     if (!mouseDownPos) return;
 
     const playerTeam = gameState.teams[gameState.playerTeam];
-    const minX = Math.min(mouseDownPos.x, pos.x);
-    const maxX = Math.max(mouseDownPos.x, pos.x);
-    const minY = Math.min(mouseDownPos.y, pos.y);
-    const maxY = Math.max(mouseDownPos.y, pos.y);
+    const minX = Math.min(mouseDownPos.x, worldPos.x);
+    const maxX = Math.max(mouseDownPos.x, worldPos.x);
+    const minY = Math.min(mouseDownPos.y, worldPos.y);
+    const maxY = Math.max(mouseDownPos.y, worldPos.y);
+
+    const isClick = Math.abs(mouseDownPos.x - worldPos.x) < 10 && Math.abs(mouseDownPos.y - worldPos.y) < 10;
 
     const selectedUnitIds: string[] = [];
     const selectedBuildingIds: string[] = [];
 
-    playerTeam.units.forEach(unit => {
-      const inBox = unit.position.x >= minX && unit.position.x <= maxX &&
-                    unit.position.y >= minY && unit.position.y <= maxY;
+    if (isClick) {
+      let clickedUnit: Unit | undefined;
+      let clickedBuilding: Building | undefined;
 
-      if (inBox) {
-        selectedUnitIds.push(unit.id);
-        unit.selected = true;
-      } else {
-        unit.selected = false;
-      }
-    });
-
-    if (selectedUnitIds.length === 0) {
-      playerTeam.buildings.forEach(building => {
-        const inBox = building.position.x >= minX && building.position.x <= maxX &&
-                      building.position.y >= minY && building.position.y <= maxY;
-
-        if (inBox) {
-          selectedBuildingIds.push(building.id);
-          building.selected = true;
-        } else {
-          building.selected = false;
+      playerTeam.units.forEach(unit => {
+        if (distance(unit.position, worldPos) < 25) {
+          clickedUnit = unit;
         }
       });
-    } else {
+
+      if (!clickedUnit) {
+        playerTeam.buildings.forEach(building => {
+          if (distance(building.position, worldPos) < 50) {
+            clickedBuilding = building;
+          }
+        });
+      }
+
+      playerTeam.units.forEach(u => u.selected = false);
       playerTeam.buildings.forEach(b => b.selected = false);
+
+      if (clickedUnit) {
+        clickedUnit.selected = true;
+        selectedUnitIds.push(clickedUnit.id);
+      } else if (clickedBuilding) {
+        clickedBuilding.selected = true;
+        selectedBuildingIds.push(clickedBuilding.id);
+      }
+    } else {
+      playerTeam.units.forEach(unit => {
+        const inBox = unit.position.x >= minX && unit.position.x <= maxX &&
+                      unit.position.y >= minY && unit.position.y <= maxY;
+        unit.selected = inBox;
+        if (inBox) selectedUnitIds.push(unit.id);
+      });
+
+      if (selectedUnitIds.length === 0) {
+        playerTeam.buildings.forEach(building => {
+          const inBox = building.position.x >= minX && building.position.x <= maxX &&
+                        building.position.y >= minY && building.position.y <= maxY;
+          building.selected = inBox;
+          if (inBox) selectedBuildingIds.push(building.id);
+        });
+      } else {
+        playerTeam.buildings.forEach(b => b.selected = false);
+      }
     }
 
     setGameState(prev => ({
@@ -99,26 +148,35 @@ export default function Game({ faction }: GameProps) {
 
     if (buildMode) {
       const config = BUILDING_CONFIGS[buildMode];
+      const tileSize = MAP_SIZES[mapSize].tileSize;
+      const tileX = Math.floor(worldPos.x / tileSize);
+      const tileY = Math.floor(worldPos.y / tileSize);
 
-      if (playerTeam.resources >= config.cost) {
-        const newBuilding: Building = {
-          id: `building-${gameState.playerTeam}-${Date.now()}`,
-          type: buildMode,
-          faction: playerTeam.faction,
-          position: worldPos,
-          health: config.health,
-          maxHealth: config.health,
-          selected: false,
-          productionProgress: 0,
-          productionTime: 0,
-        };
+      if (tileX >= 0 && tileX < gameState.map.width && tileY >= 0 && tileY < gameState.map.height) {
+        const tile = gameState.map.tiles[tileY][tileX];
+        if (tile.passable && playerTeam.resources >= config.cost) {
+          const newBuilding: Building = {
+            id: `building-${gameState.playerTeam}-${Date.now()}`,
+            type: buildMode,
+            faction: playerTeam.faction,
+            teamId: playerTeam.id,
+            position: worldPos,
+            health: config.health,
+            maxHealth: config.health,
+            selected: false,
+            productionProgress: 0,
+            productionTime: 0,
+            isTurret: config.isTurret,
+            turretRange: config.turretRange,
+            turretDamage: config.turretDamage,
+            turretLastAttack: 0,
+          };
 
-        playerTeam.buildings.push(newBuilding);
-        playerTeam.resources -= config.cost;
-
-        setGameState({ ...gameState });
+          playerTeam.buildings.push(newBuilding);
+          playerTeam.resources -= config.cost;
+          setGameState({ ...gameState });
+        }
       }
-
       setBuildMode(null);
       return;
     }
@@ -128,17 +186,11 @@ export default function Game({ faction }: GameProps) {
 
     gameState.teams.forEach(team => {
       if (team.id === gameState.playerTeam) return;
-
       team.units.forEach(unit => {
-        if (distance(unit.position, worldPos) < 30) {
-          targetUnit = unit;
-        }
+        if (distance(unit.position, worldPos) < 30) targetUnit = unit;
       });
-
       team.buildings.forEach(building => {
-        if (distance(building.position, worldPos) < 50) {
-          targetBuilding = building;
-        }
+        if (distance(building.position, worldPos) < 50) targetBuilding = building;
       });
     });
 
@@ -147,38 +199,33 @@ export default function Game({ faction }: GameProps) {
     if (targetUnit) {
       selectedUnits.forEach(unit => {
         unit.targetUnit = targetUnit!.id;
+        unit.targetBuilding = undefined;
         unit.targetPosition = undefined;
       });
     } else if (targetBuilding) {
       selectedUnits.forEach(unit => {
-        const isBuilder = unit.type === 'servant' || unit.type === 'slave';
-
-        if (isBuilder) {
+        if (isBuilder(unit.type)) {
           unit.targetPosition = targetBuilding!.position;
+          unit.targetUnit = undefined;
+          unit.targetBuilding = undefined;
           unit.moving = true;
+        } else {
+          unit.targetBuilding = targetBuilding!.id;
+          unit.targetUnit = undefined;
+          unit.targetPosition = undefined;
         }
       });
     } else {
-      playerTeam.buildings.forEach(building => {
-        if (building.selected && distance(building.position, worldPos) < 80) {
-          const isBuilder = selectedUnits.some(u => u.type === 'servant' || u.type === 'slave');
-
-          if (isBuilder && building.health < building.maxHealth) {
-            building.health = Math.min(building.health + 50, building.maxHealth);
-            playerTeam.resources -= 10;
-          }
-        }
-      });
-
       selectedUnits.forEach(unit => {
         unit.targetPosition = worldPos;
         unit.moving = true;
         unit.targetUnit = undefined;
+        unit.targetBuilding = undefined;
       });
     }
 
     setGameState({ ...gameState });
-  }, [gameState, buildMode]);
+  }, [gameState, buildMode, mapSize]);
 
   const handleProduceUnit = useCallback((building: Building, unitType: UnitType) => {
     const playerTeam = gameState.teams[gameState.playerTeam];
@@ -189,7 +236,6 @@ export default function Game({ faction }: GameProps) {
       building.productionTime = config.buildTime;
       building.productionProgress = 0;
       playerTeam.resources -= config.cost;
-
       setGameState({ ...gameState });
     }
   }, [gameState]);
@@ -207,7 +253,6 @@ export default function Game({ faction }: GameProps) {
       unit.health += UNIT_CONFIGS[unit.type].health;
       unit.maxHealth += UNIT_CONFIGS[unit.type].health;
       playerTeam.resources -= addCost;
-
       setGameState({ ...gameState });
     }
   }, [gameState]);
@@ -217,36 +262,35 @@ export default function Game({ faction }: GameProps) {
   const selectedBuildings = playerTeam.buildings.filter(b => b.selected);
 
   return (
-    <div className="min-h-screen bg-slate-900 p-4">
-      <div className="max-w-[1600px] mx-auto">
-        <div className="grid grid-cols-[1fr_350px] gap-4">
-          <div>
-            <GameCanvas
-              gameState={gameState}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onRightClick={handleRightClick}
-            />
-            {buildMode && (
-              <div className="mt-2 p-2 bg-yellow-600 text-white rounded text-center">
-                Режим строительства: {BUILDING_CONFIGS[buildMode].name}
-                <br />
-                Нажмите ПКМ для размещения или ESC для отмены
-              </div>
-            )}
-          </div>
+    <div className="min-h-screen bg-slate-950 flex flex-col">
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden">
+          <GameCanvas
+            gameState={gameState}
+            mapSize={mapSize}
+            camera={camera}
+            onCameraChange={setCamera}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onRightClick={handleRightClick}
+          />
+          {buildMode && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-yellow-600/90 text-white rounded-lg text-sm shadow-lg">
+              Строительство: {BUILDING_CONFIGS[buildMode].name} -- ПКМ для размещения, ESC для отмены
+            </div>
+          )}
+        </div>
 
-          <div>
-            <GameUI
-              gameState={gameState}
-              selectedUnits={selectedUnits}
-              selectedBuildings={selectedBuildings}
-              onProduceUnit={handleProduceUnit}
-              onBuildBuilding={handleBuildBuilding}
-              onAddToSquad={handleAddToSquad}
-            />
-          </div>
+        <div className="overflow-y-auto max-h-screen p-2 bg-slate-900/50 border-l border-slate-700/50">
+          <GameUI
+            gameState={gameState}
+            selectedUnits={selectedUnits}
+            selectedBuildings={selectedBuildings}
+            onProduceUnit={handleProduceUnit}
+            onBuildBuilding={handleBuildBuilding}
+            onAddToSquad={handleAddToSquad}
+          />
         </div>
       </div>
     </div>

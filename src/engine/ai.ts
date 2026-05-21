@@ -1,20 +1,20 @@
-import { GameState, Team, Unit, Building, UnitType, BuildingType } from '../types/game';
+import { GameState, Unit, Building, UnitType, BuildingType, FACTION_CONFIGS } from '../types/game';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
+import { distance } from './gameEngine';
 
 export function updateAI(state: GameState): GameState {
   const newState = { ...state };
 
   newState.teams.forEach((team, teamIndex) => {
-    if (team.isPlayer) return;
+    if (team.isPlayer || team.defeated) return;
 
-    const mainBuilding = team.buildings.find(b =>
-      b.type === 'heaven_temple' || b.type === 'hell_sanctuary'
-    );
+    const factionConfig = FACTION_CONFIGS[team.faction];
+    const mainBuilding = team.buildings.find(b => b.type === factionConfig.mainBuilding);
 
     if (!mainBuilding) return;
 
-    const builderType: UnitType = team.faction === 'angels' ? 'servant' : 'slave';
+    const builderType = factionConfig.builderUnit;
     const hasBuilder = team.units.some(u => u.type === builderType);
 
     if (!hasBuilder && team.resources >= 15 && !mainBuilding.producing) {
@@ -25,20 +25,19 @@ export function updateAI(state: GameState): GameState {
     }
 
     if (team.resources >= 80) {
-      const hasResourceBuilding = team.buildings.some(b =>
-        b.type === 'holy_altar' || b.type === 'dark_altar'
-      );
+      const hasResourceBuilding = team.buildings.some(b => b.type === factionConfig.resourceBuilding);
 
       if (!hasResourceBuilding) {
         const builder = team.units.find(u => u.type === builderType);
         if (builder && !builder.moving) {
-          const buildingType: BuildingType = team.faction === 'angels' ? 'holy_altar' : 'dark_altar';
+          const buildingType: BuildingType = factionConfig.resourceBuilding;
           const config = BUILDING_CONFIGS[buildingType];
 
           const newBuilding: Building = {
             id: `building-${teamIndex}-${Date.now()}`,
             type: buildingType,
             faction: team.faction,
+            teamId: team.id,
             position: {
               x: mainBuilding.position.x + 150,
               y: mainBuilding.position.y + 150,
@@ -48,6 +47,10 @@ export function updateAI(state: GameState): GameState {
             selected: false,
             productionProgress: 0,
             productionTime: 0,
+            isTurret: config.isTurret,
+            turretRange: config.turretRange,
+            turretDamage: config.turretDamage,
+            turretLastAttack: 0,
           };
 
           team.buildings.push(newBuilding);
@@ -56,21 +59,20 @@ export function updateAI(state: GameState): GameState {
       }
     }
 
-    if (team.resources >= 150 && team.buildings.length < 3) {
-      const hasBarracks = team.buildings.some(b =>
-        b.type === 'heart_heaven' || b.type === 'heart_hell'
-      );
+    if (team.resources >= 150 && team.buildings.length < 4) {
+      const hasBarracks = team.buildings.some(b => b.type === factionConfig.barracksBuilding);
 
       if (!hasBarracks) {
         const builder = team.units.find(u => u.type === builderType);
         if (builder && !builder.moving) {
-          const buildingType: BuildingType = team.faction === 'angels' ? 'heart_heaven' : 'heart_hell';
+          const buildingType: BuildingType = factionConfig.barracksBuilding;
           const config = BUILDING_CONFIGS[buildingType];
 
           const newBuilding: Building = {
             id: `building-${teamIndex}-${Date.now()}`,
             type: buildingType,
             faction: team.faction,
+            teamId: team.id,
             position: {
               x: mainBuilding.position.x - 150,
               y: mainBuilding.position.y + 150,
@@ -80,6 +82,10 @@ export function updateAI(state: GameState): GameState {
             selected: false,
             productionProgress: 0,
             productionTime: 0,
+            isTurret: config.isTurret,
+            turretRange: config.turretRange,
+            turretDamage: config.turretDamage,
+            turretLastAttack: 0,
           };
 
           team.buildings.push(newBuilding);
@@ -89,7 +95,7 @@ export function updateAI(state: GameState): GameState {
     }
 
     const productionBuildings = team.buildings.filter(b =>
-      !b.producing && BUILDING_CONFIGS[b.type].canProduce
+      !b.producing && BUILDING_CONFIGS[b.type].canProduce && BUILDING_CONFIGS[b.type].canProduce!.length > 0
     );
 
     productionBuildings.forEach(building => {
@@ -98,14 +104,14 @@ export function updateAI(state: GameState): GameState {
 
       let unitType: UnitType | undefined;
 
-      if (team.resources >= 100 && canProduce.includes('seraphim' as UnitType)) {
-        unitType = team.faction === 'angels' ? 'seraphim' : 'infernal';
-      } else if (team.resources >= 80 && canProduce.includes('paladin' as UnitType)) {
-        unitType = team.faction === 'angels' ? 'paladin' : 'hellknight';
-      } else if (team.resources >= 72 && canProduce.includes('angel' as UnitType)) {
-        unitType = team.faction === 'angels' ? 'angel' : 'demon';
-      } else if (team.resources >= 40 && canProduce.includes('priest' as UnitType)) {
-        unitType = team.faction === 'angels' ? 'priest' : 'cultist';
+      if (team.resources >= 200 && canProduce.some(u => UNIT_CONFIGS[u].isHero)) {
+        unitType = canProduce.find(u => UNIT_CONFIGS[u].isHero);
+      } else if (team.resources >= 100) {
+        const expensive = canProduce.filter(u => UNIT_CONFIGS[u].cost >= 70 && !UNIT_CONFIGS[u].isHero);
+        if (expensive.length > 0) unitType = expensive[0];
+      } else if (team.resources >= 40) {
+        const cheap = canProduce.filter(u => UNIT_CONFIGS[u].cost < 70 && !UNIT_CONFIGS[u].isHero);
+        if (cheap.length > 0) unitType = cheap[0];
       }
 
       if (unitType) {
@@ -122,40 +128,41 @@ export function updateAI(state: GameState): GameState {
     team.units.forEach(unit => {
       if (unit.type === builderType) return;
 
-      if (!unit.targetUnit && !unit.moving) {
+      if (!unit.targetUnit && !unit.targetBuilding && !unit.moving) {
         let closestEnemy: Unit | undefined;
-        let closestDistance = Infinity;
+        let closestEnemyDist = Infinity;
+        let closestBuilding: Building | undefined;
+        let closestBuildingDist = Infinity;
 
         enemyTeams.forEach(enemyTeam => {
+          if (enemyTeam.defeated) return;
           enemyTeam.units.forEach(enemyUnit => {
-            const dx = enemyUnit.position.x - unit.position.x;
-            const dy = enemyUnit.position.y - unit.position.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-
-            if (distance < closestDistance) {
-              closestDistance = distance;
+            const d = distance(unit.position, enemyUnit.position);
+            if (d < closestEnemyDist) {
+              closestEnemyDist = d;
               closestEnemy = enemyUnit;
             }
           });
 
           enemyTeam.buildings.forEach(enemyBuilding => {
-            const dx = enemyBuilding.position.x - unit.position.x;
-            const dy = enemyBuilding.position.y - unit.position.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-
-            if (distance < closestDistance && distance < 500) {
-              closestDistance = distance;
+            const d = distance(unit.position, enemyBuilding.position);
+            if (d < closestBuildingDist) {
+              closestBuildingDist = d;
+              closestBuilding = enemyBuilding;
             }
           });
         });
 
-        if (closestEnemy && closestDistance < 800) {
+        if (closestEnemy && closestEnemyDist < 600) {
           unit.targetUnit = closestEnemy.id;
-        } else if (closestDistance < 300) {
-          const centerX = state.mapSize.width / 2;
-          const centerY = state.mapSize.height / 2;
-          unit.targetPosition = { x: centerX, y: centerY };
-          unit.moving = true;
+        } else if (closestBuilding && closestBuildingDist < 800) {
+          unit.targetBuilding = closestBuilding.id;
+        } else {
+          const cp = state.map.controlPoints.find(cp => cp.owner !== team.id);
+          if (cp) {
+            unit.targetPosition = { x: cp.position.x * 32 + 16, y: cp.position.y * 32 + 16 };
+            unit.moving = true;
+          }
         }
       }
     });
