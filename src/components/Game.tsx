@@ -3,7 +3,7 @@ import {
   GameState, FactionType, Position, Unit, Building, UnitType, BuildingType,
   MapSize, Difficulty, MAP_SIZES, LevelUpStat, FACTION_CONFIGS, SpeechAction,
 } from '../types/game';
-import { initializeGame, updateGame, distance, isBuilder, applyLevelUp, getMapSizeFromState, addSpeechBubble } from '../engine/gameEngine';
+import { initializeGame, updateGame, distance, isBuilder, applyLevelUp, getMapSizeFromState, addSpeechBubble, assignFormationTargets, castAbilityAtPosition } from '../engine/gameEngine';
 import { updateAI } from '../engine/ai';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
@@ -28,6 +28,17 @@ function getInitialCamera(gameState: GameState): Position {
   return { x: 0, y: 0 };
 }
 
+function clampCamera(cam: Position, mapWidth: number, mapHeight: number, tileSize: number, viewWidth: number, viewHeight: number): Position {
+  const mapPixelW = mapWidth * tileSize;
+  const mapPixelH = mapHeight * tileSize;
+  const maxX = Math.max(0, mapPixelW - viewWidth);
+  const maxY = Math.max(0, mapPixelH - viewHeight);
+  return {
+    x: Math.max(0, Math.min(cam.x, maxX)),
+    y: Math.max(0, Math.min(cam.y, maxY)),
+  };
+}
+
 export default function Game({ faction, mapSize, difficulty }: GameProps) {
   const [gameState, setGameState] = useState<GameState>(() => initializeGame(faction, mapSize, difficulty));
   const [mouseDownPos, setMouseDownPos] = useState<Position | null>(null);
@@ -35,6 +46,8 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
   const [camera, setCamera] = useState<Position>(() => getInitialCamera(gameState));
   const [inspectedUnit, setInspectedUnit] = useState<Unit | null>(null);
   const [inspectedBuilding, setInspectedBuilding] = useState<Building | null>(null);
+  const [attackMoveMode, setAttackMoveMode] = useState(false);
+  const [abilityTargetMode, setAbilityTargetMode] = useState<{ unitId: string; abilityId: string } | null>(null);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -67,20 +80,36 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setBuildMode(null);
+      if (e.key === 'Escape') { setBuildMode(null); setAttackMoveMode(false); setAbilityTargetMode(null); }
       if (e.key === ' ') {
         e.preventDefault();
         centerOnMainBuilding();
       }
-      const speed = 30;
-      if (e.key === 'ArrowLeft' || e.key === 'a') setCamera(p => ({ ...p, x: p.x - speed }));
-      if (e.key === 'ArrowRight' || e.key === 'd') setCamera(p => ({ ...p, x: p.x + speed }));
-      if (e.key === 'ArrowUp' || e.key === 'w') setCamera(p => ({ ...p, y: p.y - speed }));
-      if (e.key === 'ArrowDown' || e.key === 's') setCamera(p => ({ ...p, y: p.y + speed }));
+      if (e.key === 'a' || e.key === 'A') {
+        if (!buildMode) setAttackMoveMode(true);
+      }
+      if (e.key === 'h' || e.key === 'H') {
+        const playerTeam = gameState.teams[gameState.playerTeam];
+        playerTeam.units.forEach(u => { if (u.selected) { u.holdPosition = true; u.moving = false; u.targetPosition = undefined; u.path = []; u.pathIndex = 0; } });
+        setGameState({ ...gameState });
+      }
+      if (e.key === 's' || e.key === 'S') {
+        if (!e.ctrlKey && !e.metaKey) {
+          const playerTeam = gameState.teams[gameState.playerTeam];
+          playerTeam.units.forEach(u => { if (u.selected) { u.moving = false; u.targetPosition = undefined; u.targetUnit = undefined; u.targetBuilding = undefined; u.path = []; u.pathIndex = 0; u.holdPosition = false; } });
+          setGameState({ ...gameState });
+        }
+      }
+      const speed = 40;
+      const tileSize = MAP_SIZES[mapSize].tileSize;
+      if (e.key === 'ArrowLeft') setCamera(p => clampCamera({ ...p, x: p.x - speed }, gameState.map.width, gameState.map.height, tileSize, 1000, 700));
+      if (e.key === 'ArrowRight') setCamera(p => clampCamera({ ...p, x: p.x + speed }, gameState.map.width, gameState.map.height, tileSize, 1000, 700));
+      if (e.key === 'ArrowUp') setCamera(p => clampCamera({ ...p, y: p.y - speed }, gameState.map.width, gameState.map.height, tileSize, 1000, 700));
+      if (e.key === 'ArrowDown') setCamera(p => clampCamera({ ...p, y: p.y + speed }, gameState.map.width, gameState.map.height, tileSize, 1000, 700));
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [centerOnMainBuilding]);
+  }, [centerOnMainBuilding, gameState, buildMode, mapSize]);
 
   const handleMouseDown = useCallback((_screenPos: Position, worldPos: Position) => {
     setMouseDownPos(worldPos);
@@ -205,6 +234,19 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
   const handleRightClick = useCallback((worldPos: Position) => {
     const playerTeam = gameState.teams[gameState.playerTeam];
 
+    if (abilityTargetMode) {
+      const hero = playerTeam.units.find(u => u.id === abilityTargetMode.unitId);
+      if (hero) {
+        const ability = hero.abilities.find(a => a.id === abilityTargetMode.abilityId);
+        if (ability && hero.mana >= ability.manaCost) {
+          castAbilityAtPosition(gameState, hero, ability, worldPos);
+          setGameState({ ...gameState });
+        }
+      }
+      setAbilityTargetMode(null);
+      return;
+    }
+
     if (buildMode) {
       const config = BUILDING_CONFIGS[buildMode];
       const tileSize = MAP_SIZES[mapSize].tileSize;
@@ -318,16 +360,22 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
         gameState.speechBubbles.push(bubble);
       }
     } else {
+      const selectedUnits = playerTeam.units.filter(u => u.selected);
+      const isAttackMove = attackMoveMode;
+      setAttackMoveMode(false);
+
+      assignFormationTargets(selectedUnits, worldPos, gameState);
+
       selectedUnits.forEach(unit => {
+        unit.holdPosition = false;
+        unit.command = isAttackMove ? 'attackMove' : 'normal';
         const currentMapSize = getMapSizeFromState(gameState);
-        const path = findPathWorld(gameState.map, unit.position, worldPos, currentMapSize);
+        const path = findPathWorld(gameState.map, unit.position, unit.targetPosition || worldPos, currentMapSize);
         if (path.length > 1) {
           unit.path = path.slice(1);
           unit.pathIndex = 0;
           unit.moving = true;
-          unit.targetPosition = worldPos;
         } else {
-          unit.targetPosition = worldPos;
           unit.moving = true;
           unit.path = [];
           unit.pathIndex = 0;
@@ -345,7 +393,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     }
 
     setGameState({ ...gameState });
-  }, [gameState, buildMode, mapSize, isWithinMapBounds]);
+  }, [gameState, buildMode, mapSize, isWithinMapBounds, attackMoveMode, abilityTargetMode]);
 
   const handleProduceUnit = useCallback((building: Building, unitType: UnitType) => {
     const playerTeam = gameState.teams[gameState.playerTeam];
@@ -388,6 +436,10 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     }
   }, [gameState]);
 
+  const handleCastAbility = useCallback((unit: Unit, abilityId: string) => {
+    setAbilityTargetMode({ unitId: unit.id, abilityId });
+  }, []);
+
   const handleRestart = useCallback(() => {
     const newGame = initializeGame(faction, mapSize, difficulty);
     setGameState(newGame);
@@ -408,6 +460,8 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
             mapSize={mapSize}
             camera={camera}
             buildModeActive={buildMode !== null}
+            attackMoveMode={attackMoveMode}
+            abilityTargetMode={abilityTargetMode !== null}
             onCameraChange={setCamera}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
@@ -417,6 +471,16 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
           {buildMode && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-yellow-600/90 text-white rounded-lg text-sm shadow-lg">
               Строительство: {BUILDING_CONFIGS[buildMode].name} -- ПКМ рядом со строителем, ESC для отмены
+            </div>
+          )}
+          {attackMoveMode && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-red-600/90 text-white rounded-lg text-sm shadow-lg">
+              Режим атаки -- ПКМ для выбора цели движения, ESC для отмены
+            </div>
+          )}
+          {abilityTargetMode && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-orange-600/90 text-white rounded-lg text-sm shadow-lg">
+              Выбор цели способности -- ПКМ на карте, ESC для отмены
             </div>
           )}
           {gameState.gameOver && (
@@ -455,6 +519,8 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
             onBuildBuilding={handleBuildBuilding}
             onAddToSquad={handleAddToSquad}
             onLevelUp={handleLevelUp}
+            onCastAbility={handleCastAbility}
+            abilityTargetMode={abilityTargetMode}
           />
         </div>
       </div>

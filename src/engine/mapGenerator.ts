@@ -4,11 +4,11 @@ const TILE_TEMPLATES: Record<TileType, Omit<Tile, 'resourceAmount'>> = {
   grass: { type: 'grass', passable: true, movementCost: 1, ascii: '·', color: '#2d4a2d', bgColor: '#1a2e1a' },
   dirt: { type: 'dirt', passable: true, movementCost: 1.2, ascii: '░', color: '#4a3d2d', bgColor: '#2e241a' },
   rock: { type: 'rock', passable: false, movementCost: 999, ascii: '▓', color: '#555566', bgColor: '#2a2a33' },
-  forest: { type: 'forest', passable: true, movementCost: 2, ascii: '♣', color: '#1a5a1a', bgColor: '#0e2e0e' },
-  crystal: { type: 'crystal', passable: true, movementCost: 1, ascii: '◆', color: '#60d0ff', bgColor: '#0e1e2e' },
-  water: { type: 'water', passable: false, movementCost: 999, ascii: '≈', color: '#2266aa', bgColor: '#0a1a3a' },
-  ruins: { type: 'ruins', passable: true, movementCost: 1.5, ascii: '⌂', color: '#6a5a4a', bgColor: '#2a2218' },
-  control_point: { type: 'control_point', passable: true, movementCost: 1, ascii: '◎', color: '#ffdd44', bgColor: '#3a3a1a' },
+  forest: { type: 'forest', passable: true, movementCost: 2, ascii: 'Y', color: '#1a5a1a', bgColor: '#0e2e0e' },
+  crystal: { type: 'crystal', passable: true, movementCost: 1, ascii: 'D', color: '#60d0ff', bgColor: '#0e1e2e' },
+  water: { type: 'water', passable: false, movementCost: 999, ascii: '~', color: '#2266aa', bgColor: '#0a1a3a' },
+  ruins: { type: 'ruins', passable: true, movementCost: 1.5, ascii: 'n', color: '#6a5a4a', bgColor: '#2a2218' },
+  control_point: { type: 'control_point', passable: true, movementCost: 1, ascii: 'O', color: '#ffdd44', bgColor: '#3a3a1a' },
 };
 
 function seededRandom(seed: number): () => number {
@@ -117,7 +117,7 @@ export function generateMap(mapSize: MapSize, seed?: number): GameMap {
       owner: null,
       captureProgress: [0, 0, 0, 0],
       resourceRate: 2,
-      ascii: '◎',
+      ascii: 'O',
     });
 
     for (let dy = -1; dy <= 1; dy++) {

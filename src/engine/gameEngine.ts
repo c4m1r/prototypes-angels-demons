@@ -2,7 +2,7 @@ import {
   GameState, Team, Unit, Building, FactionType, Position,
   UnitType, Difficulty, MapSize, ControlPoint, CombatEvent,
   LevelUpStat, FACTION_CONFIGS, MAP_SIZES, getAIProfile, AIPersonality,
-  DeathMarker, SpeechBubble, SpeechAction, SPEECH_LINES,
+  DeathMarker, SpeechBubble, SpeechAction, SPEECH_LINES, Ability,
 } from '../types/game';
 import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
@@ -94,6 +94,11 @@ export function initializeGame(
       lastAttackFlash: 0,
       pendingLevelUps: 0,
       abilities: [],
+      command: 'normal',
+      holdPosition: false,
+      harvesting: false,
+      carryAmount: 0,
+      maxCarry: 10,
     };
 
     const startResources = difficulty === 'easy' ? 500 : difficulty === 'normal' ? 300 : 200;
@@ -136,6 +141,7 @@ export function initializeGame(
     deathMarkers: [],
     speechBubbles: [],
     revealedTiles,
+    notifications: [],
   };
 }
 
@@ -202,6 +208,11 @@ export function updateGame(state: GameState, deltaTime: number): GameState {
               description: a.description,
               ascii: a.ascii,
             })),
+            command: 'normal',
+            holdPosition: false,
+            harvesting: false,
+            carryAmount: 0,
+            maxCarry: 10,
           };
 
           team.units.push(newUnit);
@@ -255,6 +266,10 @@ export function updateGame(state: GameState, deltaTime: number): GameState {
 
     team.units = team.units.filter(unit => {
       updateUnitMovement(unit, newState, deltaTime);
+
+      if (isBuilder(unit.type) && !unit.targetUnit && !unit.targetBuilding) {
+        updateHarvesting(unit, newState, team, deltaTime);
+      }
 
       const attackResult = updateUnitCombat(unit, newState, combatEvents, team);
       if (attackResult) combatEvents.push(attackResult);
@@ -359,6 +374,8 @@ export function updateGame(state: GameState, deltaTime: number): GameState {
 }
 
 function updateUnitMovement(unit: Unit, _state: GameState, deltaTime: number) {
+  if (unit.holdPosition) return;
+
   if (unit.path.length > 0 && unit.pathIndex < unit.path.length) {
     const target = unit.path[unit.pathIndex];
     const dx = target.x - unit.position.x;
@@ -514,6 +531,89 @@ function moveTowardTarget(unit: Unit, targetPos: Position, state: GameState) {
   }
 }
 
+function updateHarvesting(unit: Unit, state: GameState, team: Team, deltaTime: number) {
+  const tileSize = 32;
+  const unitTileX = Math.floor(unit.position.x / tileSize);
+  const unitTileY = Math.floor(unit.position.y / tileSize);
+
+  if (unit.carryAmount >= unit.maxCarry) {
+    const mainBuilding = team.buildings.find(b => b.type === FACTION_CONFIGS[team.faction].mainBuilding);
+    if (mainBuilding) {
+      const d = distance(unit.position, mainBuilding.position);
+      if (d < 60) {
+        team.resources += unit.carryAmount * 2;
+        unit.carryAmount = 0;
+        unit.harvesting = false;
+      } else if (!unit.moving && !unit.harvesting) {
+        unit.targetPosition = { ...mainBuilding.position };
+        unit.moving = true;
+        unit.harvesting = false;
+      }
+    }
+    return;
+  }
+
+  if (unit.harvesting && !unit.moving) {
+    const tile = state.map.tiles[unitTileY]?.[unitTileX];
+    if (tile && tile.type === 'crystal' && tile.resourceAmount > 0) {
+      const harvestRate = 5 * deltaTime / 1000;
+      const harvested = Math.min(harvestRate, tile.resourceAmount);
+      tile.resourceAmount -= harvested;
+      unit.carryAmount += harvested;
+      if (tile.resourceAmount <= 0) {
+        tile.type = 'dirt';
+        tile.ascii = '.';
+        tile.color = '#4a3d2d';
+        tile.bgColor = '#2e241a';
+        tile.movementCost = 1.2;
+        unit.harvesting = false;
+      }
+    } else {
+      unit.harvesting = false;
+    }
+    return;
+  }
+
+  if (!unit.moving && !unit.harvesting && unit.carryAmount < unit.maxCarry) {
+    let closestCrystal: Position | null = null;
+    let closestDist = 200;
+    const searchRadius = 10;
+    for (let dy = -searchRadius; dy <= searchRadius; dy++) {
+      for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+        const tx = unitTileX + dx;
+        const ty = unitTileY + dy;
+        if (tx < 0 || tx >= state.map.width || ty < 0 || ty >= state.map.height) continue;
+        const tile = state.map.tiles[ty][tx];
+        if (tile.type === 'crystal' && tile.resourceAmount > 0) {
+          const crystalWorldPos = { x: tx * tileSize + tileSize / 2, y: ty * tileSize + tileSize / 2 };
+          const d = distance(unit.position, crystalWorldPos);
+          if (d < closestDist) {
+            closestDist = d;
+            closestCrystal = crystalWorldPos;
+          }
+        }
+      }
+    }
+    if (closestCrystal) {
+      unit.targetPosition = closestCrystal;
+      unit.moving = true;
+    }
+  }
+
+  if (unit.moving && unit.targetPosition && !unit.harvesting) {
+    const targetTileX = Math.floor(unit.targetPosition.x / tileSize);
+    const targetTileY = Math.floor(unit.targetPosition.y / tileSize);
+    const tile = state.map.tiles[targetTileY]?.[targetTileX];
+    if (tile && tile.type === 'crystal' && tile.resourceAmount > 0) {
+      const d = distance(unit.position, unit.targetPosition);
+      if (d < 20) {
+        unit.harvesting = true;
+        unit.moving = false;
+      }
+    }
+  }
+}
+
 function autoAttackNearest(
   unit: Unit,
   state: GameState,
@@ -521,6 +621,7 @@ function autoAttackNearest(
   team: Team
 ) {
   if (isBuilder(unit.type)) return;
+  if (unit.holdPosition) return;
 
   let closestEnemy: Unit | undefined;
   let closestDist = unit.range * 1.5;
@@ -869,4 +970,84 @@ export function addSpeechBubble(state: GameState, unit: Unit, action: SpeechActi
     existing.timestamp = 0;
   }
   return createSpeechBubble(unit, action);
+}
+
+export function assignFormationTargets(units: Unit[], targetPos: Position, _state: GameState) {
+  if (units.length === 0) return;
+  if (units.length === 1) {
+    units[0].targetPosition = { ...targetPos };
+    return;
+  }
+
+  const cols = Math.ceil(Math.sqrt(units.length));
+  const rows = Math.ceil(units.length / cols);
+  const spacing = 40;
+  const startX = targetPos.x - ((cols - 1) * spacing) / 2;
+  const startY = targetPos.y - ((rows - 1) * spacing) / 2;
+
+  units.forEach((unit, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    unit.targetPosition = {
+      x: startX + col * spacing,
+      y: startY + row * spacing,
+    };
+  });
+}
+
+export function castAbilityAtPosition(state: GameState, hero: Unit, ability: Ability, worldPos: Position) {
+  const now = Date.now();
+  if (now - ability.lastUsed < ability.cooldown) return;
+  if (hero.mana < ability.manaCost) return;
+
+  const combatEvents: CombatEvent[] = [];
+
+  if (ability.effectType === 'damage' || ability.effectType === 'aoe') {
+    state.teams.forEach(enemyTeam => {
+      if (enemyTeam.id === hero.teamId) return;
+      enemyTeam.units.forEach(enemy => {
+        const d = distance(worldPos, enemy.position);
+        if (d < 100) {
+          enemy.health -= ability.value;
+          combatEvents.push({
+            id: `ce-${now}-${Math.random()}`,
+            type: 'damage',
+            position: { ...enemy.position },
+            value: ability.value,
+            timestamp: now,
+            color: '#ff8800',
+          });
+        }
+      });
+    });
+  } else if (ability.effectType === 'heal') {
+    const team = state.teams[hero.teamId];
+    team.units.forEach(ally => {
+      const d = distance(worldPos, ally.position);
+      if (d < 100 && ally.health < ally.maxHealth) {
+        ally.health = Math.min(ally.health + ability.value, ally.maxHealth);
+        combatEvents.push({
+          id: `ce-${now}-${Math.random()}`,
+          type: 'damage',
+          position: { ...ally.position },
+          value: -ability.value,
+          timestamp: now,
+          color: '#22dd22',
+        });
+      }
+    });
+  } else if (ability.effectType === 'buff') {
+    const team = state.teams[hero.teamId];
+    team.units.forEach(ally => {
+      const d = distance(worldPos, ally.position);
+      if (d < 100) {
+        ally.damage += ability.value;
+      }
+    });
+  }
+
+  hero.mana -= ability.manaCost;
+  ability.lastUsed = now;
+
+  state.combatEvents = [...state.combatEvents.filter(e => now - e.timestamp < 1500), ...combatEvents];
 }

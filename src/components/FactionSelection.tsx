@@ -12,10 +12,10 @@ interface FactionSelectionProps {
 }
 
 const FACTION_LIST: { type: FactionType; symbol: string; glow: string }[] = [
-  { type: 'angels', symbol: '☨', glow: 'from-blue-600 to-cyan-500' },
-  { type: 'demons', symbol: '⛤', glow: 'from-red-600 to-orange-500' },
-  { type: 'undead', symbol: '☠', glow: 'from-green-600 to-emerald-500' },
-  { type: 'machines', symbol: '⚙', glow: 'from-yellow-600 to-amber-500' },
+  { type: 'angels', symbol: '+', glow: 'from-blue-600 to-cyan-500' },
+  { type: 'demons', symbol: '#', glow: 'from-red-600 to-orange-500' },
+  { type: 'undead', symbol: '&', glow: 'from-green-600 to-emerald-500' },
+  { type: 'machines', symbol: 'O', glow: 'from-yellow-600 to-amber-500' },
 ];
 
 export default function FactionSelection({ onSelectSettings }: FactionSelectionProps) {
@@ -32,7 +32,7 @@ export default function FactionSelection({ onSelectSettings }: FactionSelectionP
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center relative">
       <div className="absolute bottom-4 left-4 text-xs text-slate-600">
-        ver.0.6.0 by{' '}
+        ver.0.5.1 by{' '}
         <a
           href="https://c4m1r.github.io"
           target="_blank"

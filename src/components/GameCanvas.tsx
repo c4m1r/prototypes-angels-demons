@@ -9,6 +9,8 @@ interface GameCanvasProps {
   mapSize: MapSize;
   camera: Position;
   buildModeActive: boolean;
+  attackMoveMode?: boolean;
+  abilityTargetMode?: boolean;
   onCameraChange: (camera: Position) => void;
   onMouseDown: (screenPos: Position, worldPos: Position) => void;
   onMouseMove: (screenPos: Position, worldPos: Position) => void;
@@ -17,10 +19,10 @@ interface GameCanvasProps {
 }
 
 const CRYSTAL_SMALL = [
-  ' ╱◆╲ ',
-  '╱◆◆◆╲',
-  '╲◆◆◆╱',
-  ' ╲◆╱ ',
+  ' /D\\ ',
+  '/DDD\\',
+  '\\DDD/',
+  ' \\D/ ',
 ];
 
 export default function GameCanvas({
@@ -28,6 +30,8 @@ export default function GameCanvas({
   mapSize,
   camera,
   buildModeActive,
+  attackMoveMode = false,
+  abilityTargetMode = false,
   onCameraChange,
   onMouseDown,
   onMouseMove,
@@ -357,12 +361,12 @@ export default function GameCanvas({
         const cx = startX + col * charSize + charSize / 2;
         const cy = startY + row * charSize + charSize / 2;
 
-        if (ch === '◆') {
+        if (ch === 'D') {
           ctx.fillStyle = visible ? '#80e0ff' : '#406080';
           ctx.font = `bold ${charSize * 1.2}px monospace`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText('◆', cx, cy);
+          ctx.fillText('D', cx, cy);
         } else {
           ctx.strokeStyle = visible ? '#60d0ff' : '#304860';
           ctx.lineWidth = 1;
@@ -657,10 +661,14 @@ export default function GameCanvas({
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const speed = 30;
-    onCameraChange({
-      x: camera.x + (e.deltaY > 0 ? speed : -speed),
-      y: camera.y + (e.deltaY > 0 ? speed : -speed),
-    });
+    const tileSize = MAP_SIZES[mapSize].tileSize;
+    const mapPixelW = gameState.map.width * tileSize;
+    const mapPixelH = gameState.map.height * tileSize;
+    const maxX = Math.max(0, mapPixelW - canvasSize.width);
+    const maxY = Math.max(0, mapPixelH - canvasSize.height);
+    const newX = Math.max(0, Math.min(camera.x + (e.deltaY > 0 ? speed : -speed), maxX));
+    const newY = Math.max(0, Math.min(camera.y + (e.deltaY > 0 ? speed : -speed), maxY));
+    onCameraChange({ x: newX, y: newY });
   };
 
   return (
@@ -668,7 +676,7 @@ export default function GameCanvas({
       ref={canvasRef}
       width={canvasSize.width}
       height={canvasSize.height}
-      className="border border-slate-700/50 bg-slate-950 cursor-crosshair block"
+      className={"border border-slate-700/50 bg-slate-950 block " + (abilityTargetMode ? "cursor-pointer" : attackMoveMode ? "cursor-crosshair" : "cursor-default")}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}

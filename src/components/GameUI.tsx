@@ -16,6 +16,8 @@ interface GameUIProps {
   onBuildBuilding: (buildingType: BuildingType) => void;
   onAddToSquad: (unit: Unit) => void;
   onLevelUp: (unit: Unit, stat: LevelUpStat) => void;
+  onCastAbility: (unit: Unit, abilityId: string) => void;
+  abilityTargetMode: { unitId: string; abilityId: string } | null;
 }
 
 export default function GameUI({
@@ -28,6 +30,8 @@ export default function GameUI({
   onBuildBuilding,
   onAddToSquad,
   onLevelUp,
+  onCastAbility,
+  abilityTargetMode,
 }: GameUIProps) {
   const playerTeam = gameState.teams[gameState.playerTeam];
   const factionConfig = FACTION_CONFIGS[playerTeam.faction];
@@ -296,9 +300,21 @@ export default function GameUI({
               const now = Date.now();
               const onCooldown = now - ability.lastUsed < ability.cooldown;
               const canUse = !onCooldown && unit.mana >= ability.manaCost;
+              const isTargeting = abilityTargetMode?.abilityId === ability.id;
 
               return (
-                <div key={ability.id} className={`text-[10px] mb-1 p-1 rounded ${canUse ? 'bg-slate-700/50' : 'bg-slate-800/30'}`}>
+                <button
+                  key={ability.id}
+                  onClick={() => canUse && onCastAbility(unit, ability.id)}
+                  disabled={!canUse}
+                  className={`w-full text-[10px] mb-1 p-1.5 rounded transition-all ${
+                    isTargeting
+                      ? 'bg-orange-600/50 border border-orange-400 animate-pulse'
+                      : canUse
+                        ? 'bg-slate-700/50 hover:bg-slate-600/70 border border-slate-500/30 cursor-pointer'
+                        : 'bg-slate-800/30 border border-slate-700/20 cursor-not-allowed'
+                  }`}
+                >
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-1">
                       <span style={{ color: canUse ? '#ff8800' : '#555' }}>{ability.ascii}</span>
@@ -314,7 +330,10 @@ export default function GameUI({
                       />
                     </div>
                   )}
-                </div>
+                  {isTargeting && (
+                    <div className="text-orange-300 text-[9px] mt-0.5">Выберите цель на карте</div>
+                  )}
+                </button>
               );
             })}
           </div>

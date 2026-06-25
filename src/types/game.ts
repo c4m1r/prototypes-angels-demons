@@ -3,6 +3,7 @@ export type MapSize = 'small' | 'medium' | 'large';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type LevelUpStat = 'movementSpeed' | 'health' | 'damage' | 'attackSpeed' | 'mana' | 'range' | 'evasion';
 export type AIPersonality = 'turtle' | 'balanced' | 'rusher';
+export type UnitCommand = 'normal' | 'attackMove' | 'holdPosition' | 'patrol';
 
 export interface Position {
   x: number;
@@ -62,6 +63,12 @@ export interface Unit {
   lastAttackFlash: number;
   pendingLevelUps: number;
   abilities: Ability[];
+  command: UnitCommand;
+  holdPosition: boolean;
+  harvestTarget?: Position;
+  harvesting: boolean;
+  carryAmount: number;
+  maxCarry: number;
 }
 
 export interface Building {
@@ -130,6 +137,8 @@ export interface GameState {
   deathMarkers: DeathMarker[];
   speechBubbles: SpeechBubble[];
   revealedTiles: boolean[][];
+  abilityTargetMode?: { unitId: string; abilityId: string };
+  notifications: GameNotification[];
 }
 
 export interface CombatEvent {
@@ -139,6 +148,13 @@ export interface CombatEvent {
   value: number;
   timestamp: number;
   color: string;
+}
+
+export interface GameNotification {
+  id: string;
+  text: string;
+  timestamp: number;
+  type: 'info' | 'warning' | 'combat' | 'victory';
 }
 
 export interface DeathMarker {
@@ -262,7 +278,7 @@ export const MAP_SIZES: Record<MapSize, { width: number; height: number; tileSiz
 export const FACTION_CONFIGS: Record<FactionType, FactionConfig> = {
   angels: {
     name: 'Ангелы',
-    symbol: '☨',
+    symbol: '+',
     color: '#60a5fa',
     glowColor: '#93c5fd',
     bgColor: '#1e3a5f',
@@ -277,7 +293,7 @@ export const FACTION_CONFIGS: Record<FactionType, FactionConfig> = {
   },
   demons: {
     name: 'Демоны',
-    symbol: '⛤',
+    symbol: '#',
     color: '#ef4444',
     glowColor: '#f87171',
     bgColor: '#5f1e1e',
@@ -292,7 +308,7 @@ export const FACTION_CONFIGS: Record<FactionType, FactionConfig> = {
   },
   undead: {
     name: 'Нежить',
-    symbol: '☠',
+    symbol: '&',
     color: '#22c55e',
     glowColor: '#4ade80',
     bgColor: '#1e3f2a',
@@ -307,7 +323,7 @@ export const FACTION_CONFIGS: Record<FactionType, FactionConfig> = {
   },
   machines: {
     name: 'Машины',
-    symbol: '⚙',
+    symbol: 'O',
     color: '#eab308',
     glowColor: '#facc15',
     bgColor: '#3f3f1e',
