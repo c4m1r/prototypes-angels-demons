@@ -8,10 +8,12 @@ interface GameCanvasProps {
   gameState: GameState;
   mapSize: MapSize;
   camera: Position;
+  zoom: number;
   buildMode: string | null;
   attackMoveMode?: boolean;
   abilityTargetMode?: boolean;
   onCameraChange: (camera: Position) => void;
+  onZoomChange: (zoom: number) => void;
   onMouseDown: (screenPos: Position, worldPos: Position) => void;
   onMouseMove: (screenPos: Position, worldPos: Position) => void;
   onMouseUp: (screenPos: Position, worldPos: Position) => void;
@@ -30,10 +32,12 @@ export default function GameCanvas({
   gameState,
   mapSize,
   camera,
+  zoom,
   buildMode,
   attackMoveMode = false,
   abilityTargetMode = false,
   onCameraChange,
+  onZoomChange,
   onMouseDown,
   onMouseMove,
   onMouseUp,
@@ -51,7 +55,7 @@ export default function GameCanvas({
     const updateSize = () => {
       const container = canvasRef.current?.parentElement;
       if (container) {
-        setCanvasSize({ width: container.clientWidth, height: Math.max(500, window.innerHeight - 160) });
+        setCanvasSize({ width: container.clientWidth, height: container.clientHeight || Math.max(500, window.innerHeight - 190) });
       }
     };
     updateSize();
@@ -72,6 +76,9 @@ export default function GameCanvas({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#080c14';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.scale(zoom, zoom);
 
     const startTileX = Math.max(0, Math.floor(camera.x / tileSize));
     const startTileY = Math.max(0, Math.floor(camera.y / tileSize));
@@ -425,7 +432,9 @@ export default function GameCanvas({
     ctx.setLineDash([]);
     ctx.strokeRect(-camera.x, -camera.y, gameState.map.width * tileSize, gameState.map.height * tileSize);
 
-  }, [gameState, camera, mapSize, canvasSize, mouseWorldPos, buildMode]);
+    ctx.restore();
+
+  }, [gameState, camera, zoom, mapSize, canvasSize, mouseWorldPos, buildMode]);
 
   // ---- Draw helpers ----
 
@@ -760,7 +769,7 @@ export default function GameCanvas({
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const screenPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    const worldPos = { x: screenPos.x + camera.x, y: screenPos.y + camera.y };
+    const worldPos = { x: screenPos.x / zoom + camera.x, y: screenPos.y / zoom + camera.y };
 
     if (e.button === 0) {
       if (buildMode) {
@@ -778,19 +787,16 @@ export default function GameCanvas({
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const screenPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    const worldPos = { x: screenPos.x + camera.x, y: screenPos.y + camera.y };
+    const worldPos = { x: screenPos.x / zoom + camera.x, y: screenPos.y / zoom + camera.y };
 
     setMouseWorldPos(worldPos);
 
     if (e.buttons === 4 || (e.buttons === 1 && e.altKey)) {
       const dx = screenPos.x - lastMousePos.x;
       const dy = screenPos.y - lastMousePos.y;
-      const tileSize = MAP_SIZES[mapSize].tileSize;
-      const maxX = Math.max(0, gameState.map.width * tileSize - canvasSize.width);
-      const maxY = Math.max(0, gameState.map.height * tileSize - canvasSize.height);
       onCameraChange({
-        x: Math.max(0, Math.min(camera.x - dx, maxX)),
-        y: Math.max(0, Math.min(camera.y - dy, maxY)),
+        x: camera.x - dx / zoom,
+        y: camera.y - dy / zoom,
       });
     }
 
@@ -811,7 +817,7 @@ export default function GameCanvas({
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
       const screenPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      const worldPos = { x: screenPos.x + camera.x, y: screenPos.y + camera.y };
+      const worldPos = { x: screenPos.x / zoom + camera.x, y: screenPos.y / zoom + camera.y };
       onMouseUp(screenPos, worldPos);
     }
   };
@@ -825,14 +831,30 @@ export default function GameCanvas({
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const tileSize = MAP_SIZES[mapSize].tileSize;
-    const speed = tileSize * 1.5;
-    const maxX = Math.max(0, gameState.map.width * tileSize - canvasSize.width);
-    const maxY = Math.max(0, gameState.map.height * tileSize - canvasSize.height);
-    const delta = e.deltaY > 0 ? speed : -speed;
-    if (e.shiftKey) {
-      onCameraChange({ x: Math.max(0, Math.min(camera.x + delta, maxX)), y: camera.y });
+
+    if (e.ctrlKey || e.metaKey) {
+      // Zoom: keep world point under cursor fixed
+      const rect = canvasRef.current?.getBoundingClientRect();
+      const mx = rect ? (e.clientX - rect.left) : canvasSize.width / 2;
+      const my = rect ? (e.clientY - rect.top) : canvasSize.height / 2;
+      const worldX = mx / zoom + camera.x;
+      const worldY = my / zoom + camera.y;
+      const factor = e.deltaY < 0 ? 1.12 : (1 / 1.12);
+      const newZoom = Math.max(0.3, Math.min(3.0, zoom * factor));
+      // Adjust camera so the world point stays under cursor
+      const newCamX = worldX - mx / newZoom;
+      const newCamY = worldY - my / newZoom;
+      onZoomChange(newZoom);
+      onCameraChange({ x: newCamX, y: newCamY });
     } else {
-      onCameraChange({ x: camera.x, y: Math.max(0, Math.min(camera.y + delta, maxY)) });
+      // Scroll
+      const speed = (tileSize * 2) / zoom;
+      const delta = e.deltaY > 0 ? speed : -speed;
+      if (e.shiftKey) {
+        onCameraChange({ x: camera.x + delta, y: camera.y });
+      } else {
+        onCameraChange({ x: camera.x, y: camera.y + delta });
+      }
     }
   };
 

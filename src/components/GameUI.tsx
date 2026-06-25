@@ -63,13 +63,16 @@ function WithTooltip({ info, children, className, style }: {
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [show, setShow] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enter = () => { timer.current = setTimeout(() => setShow(true), 320); };
+  const leave = () => { if (timer.current) clearTimeout(timer.current); setShow(false); };
   return (
     <div
       ref={ref}
       className={className}
       style={style}
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
     >
       {children}
       {show && <UITooltip info={info} anchorRef={ref} />}
@@ -281,7 +284,7 @@ function ActionBtn({
   );
 
   if (!tooltip) return btn;
-  return <WithTooltip info={tooltip} className="contents">{btn}</WithTooltip>;
+  return <WithTooltip info={tooltip} className="inline-block">{btn}</WithTooltip>;
 }
 
 // ─── Minimap ──────────────────────────────────────────────────────────────────
@@ -333,6 +336,107 @@ function Minimap({ gameState, size = 144 }: { gameState: GameState; size?: numbe
   );
 }
 
+
+// ─── Hero panel (rendered as overlay in Game.tsx, but logic lives here) ───────
+export function HeroPanel({ heroes, teamColor, glowColor, onSelect, onCenter }: {
+  heroes: Unit[];
+  teamColor: string;
+  glowColor: string;
+  onSelect: (h: Unit) => void;
+  onCenter: (h: Unit) => void;
+}) {
+  const lastClick = useRef<{ id: string; time: number }>({ id: '', time: 0 });
+
+  if (heroes.length === 0) return null;
+
+  const handleClick = (hero: Unit) => {
+    const now = Date.now();
+    const prev = lastClick.current;
+    if (prev.id === hero.id && now - prev.time < 400) {
+      onCenter(hero);
+    } else {
+      onSelect(hero);
+    }
+    lastClick.current = { id: hero.id, time: now };
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {heroes.map(hero => {
+        const cfg = UNIT_CONFIGS[hero.type];
+        const hp = hero.health / hero.maxHealth;
+        const mp = hero.maxMana > 0 ? hero.mana / hero.maxMana : 0;
+        const hpColor = hp > 0.6 ? '#22c55e' : hp > 0.3 ? '#eab308' : '#ef4444';
+        const isSelected = hero.selected;
+        const hasPendingLevelUp = hero.pendingLevelUps > 0;
+        return (
+          <WithTooltip
+            key={hero.id}
+            className="block"
+            info={{
+              title: cfg.name + ' [ГЕРОЙ Ур.' + hero.level + ']',
+              color: glowColor,
+              lines: [
+                `HP: ${Math.floor(hero.health)}/${hero.maxHealth}`,
+                hero.maxMana > 0 ? `Мана: ${Math.floor(hero.mana)}/${hero.maxMana}` : '',
+                `XP: ${hero.experience}/${hero.experienceToLevel}`,
+                'ЛКМ — выбрать  |  2×ЛКМ — центр камеры',
+              ].filter(Boolean),
+            }}
+          >
+            <button
+              onClick={() => handleClick(hero)}
+              className="relative flex items-center gap-1.5 rounded transition-all hover:brightness-110 active:scale-95"
+              style={{
+                background: isSelected ? `${teamColor}28` : '#0a0f1a',
+                border: `1.5px solid ${isSelected ? teamColor : teamColor + '44'}`,
+                boxShadow: isSelected ? `0 0 10px ${teamColor}66` : undefined,
+                padding: '3px 6px 3px 3px',
+                width: 120,
+              }}
+            >
+              {/* Portrait mini */}
+              <div
+                className="flex items-center justify-center rounded shrink-0 font-mono font-bold text-base"
+                style={{
+                  width: 28, height: 28,
+                  background: `${teamColor}18`,
+                  border: `1px solid ${teamColor}55`,
+                  color: teamColor,
+                }}
+              >
+                {cfg.ascii}
+              </div>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-[9px] font-bold truncate" style={{ color: glowColor }}>{cfg.name}</span>
+                <span className="text-[8px] text-slate-500">Ур.{hero.level}</span>
+                {/* HP bar */}
+                <div className="h-1 rounded-sm overflow-hidden mt-0.5" style={{ background: '#0f172a', border: '1px solid #1e293b' }}>
+                  <div className="h-full" style={{ width: `${hp * 100}%`, background: hpColor }} />
+                </div>
+                {hero.maxMana > 0 && (
+                  <div className="h-1 rounded-sm overflow-hidden mt-0.5" style={{ background: '#0f172a', border: '1px solid #1e293b' }}>
+                    <div className="h-full" style={{ width: `${mp * 100}%`, background: '#3b82f6' }} />
+                  </div>
+                )}
+              </div>
+              {hasPendingLevelUp && (
+                <div
+                  className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold animate-pulse"
+                  style={{ background: '#eab308', color: '#000' }}
+                >!</div>
+              )}
+              {isSelected && (
+                <div className="absolute left-0 top-0 bottom-0 w-0.5 rounded-l" style={{ background: teamColor }} />
+              )}
+            </button>
+          </WithTooltip>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Main HUD ─────────────────────────────────────────────────────────────────
 interface GameUIProps {
   gameState: GameState;
@@ -346,6 +450,8 @@ interface GameUIProps {
   onLevelUp: (unit: Unit, stat: LevelUpStat) => void;
   onCastAbility: (unit: Unit, abilityId: string) => void;
   abilityTargetMode: { unitId: string; abilityId: string } | null;
+  onSelectHero: (hero: Unit) => void;
+  onCenterHero: (hero: Unit) => void;
 }
 
 export default function GameUI({
@@ -360,6 +466,8 @@ export default function GameUI({
   onLevelUp,
   onCastAbility,
   abilityTargetMode,
+  onSelectHero: _onSelectHero,
+  onCenterHero: _onCenterHero,
 }: GameUIProps) {
   const playerTeam = gameState.teams[gameState.playerTeam];
   const fc = FACTION_CONFIGS[playerTeam.faction];
@@ -396,7 +504,7 @@ export default function GameUI({
             return (
               <WithTooltip
                 key={ab.id}
-                className="contents"
+                className="inline-block"
                 info={{
                   title: ab.name,
                   color: canUse ? '#fb923c' : '#475569',
@@ -453,7 +561,7 @@ export default function GameUI({
         {(Object.keys(LEVEL_UP_STAT_NAMES) as LevelUpStat[]).map(stat => (
           <WithTooltip
             key={stat}
-            className="contents"
+            className="inline-block"
             info={{
               title: LEVEL_UP_STAT_NAMES[stat],
               color: '#eab308',
@@ -486,7 +594,7 @@ export default function GameUI({
         <div className="flex gap-1 items-center">
           {building.producing && (
             <WithTooltip
-              className="contents"
+              className="inline-block"
               info={{
                 title: UNIT_CONFIGS[building.producing].name,
                 color: '#eab308',
@@ -509,7 +617,7 @@ export default function GameUI({
           {building.productionQueue.map((ut, i) => (
             <WithTooltip
               key={i}
-              className="contents"
+              className="inline-block"
               info={{ title: UNIT_CONFIGS[ut].name, color: '#94a3b8', lines: ['В очереди'] }}
             >
               <div className="w-8 h-8 rounded flex items-center justify-center"
@@ -537,7 +645,7 @@ export default function GameUI({
             return (
               <WithTooltip
                 key={ut}
-                className="contents"
+                className="inline-block"
                 info={{
                   title: uc.name,
                   color: canAfford ? fc.color : '#475569',
@@ -577,7 +685,7 @@ export default function GameUI({
           return (
             <WithTooltip
               key={bt}
-              className="contents"
+              className="inline-block"
               info={{
                 title: bc.name,
                 color: canAfford ? fc.color : '#475569',

@@ -9,7 +9,7 @@ import { UNIT_CONFIGS } from '../config/units';
 import { BUILDING_CONFIGS } from '../config/buildings';
 import { findPathWorld } from '../engine/pathfinding';
 import GameCanvas from './GameCanvas';
-import GameUI from './GameUI';
+import GameUI, { HeroPanel } from './GameUI';
 
 interface GameProps {
   faction: FactionType;
@@ -30,18 +30,14 @@ function getInitialCamera(gameState: GameState): Position {
 
 function clampCamera(
   cam: Position,
-  mapWidth: number,
-  mapHeight: number,
-  tileSize: number,
-  viewWidth: number,
-  viewHeight: number,
+  _mapWidth: number,
+  _mapHeight: number,
+  _tileSize: number,
+  _viewWidth: number,
+  _viewHeight: number,
 ): Position {
-  const maxX = Math.max(0, mapWidth * tileSize - viewWidth);
-  const maxY = Math.max(0, mapHeight * tileSize - viewHeight);
-  return {
-    x: Math.max(0, Math.min(cam.x, maxX)),
-    y: Math.max(0, Math.min(cam.y, maxY)),
-  };
+  // No clamping — camera can move freely beyond map edges
+  return cam;
 }
 
 // Physical key codes → action — layout-independent (works with any keyboard locale)
@@ -75,6 +71,7 @@ const HOTKEYS_TABLE = [
   { key: 'Alt+ЛКМ', desc: 'Перетяжка камеры' },
   { key: 'ESC', desc: 'Отмена / Меню паузы' },
   { key: 'F10', desc: 'Меню паузы' },
+  { key: 'Ctrl+Кол', desc: 'Приблизить / отдалить' },
 ];
 
 // HUD height constants — must match GameUI
@@ -92,6 +89,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
   const [abilityTargetMode, setAbilityTargetMode] = useState<{ unitId: string; abilityId: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [zoom, setZoom] = useState(1.0);
 
   // ── Game loop ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -403,6 +401,27 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
     setAbilityTargetMode({ unitId: unit.id, abilityId });
   }, []);
 
+  const handleSelectHero = useCallback((hero: Unit) => {
+    setGameState(prev => {
+      const pt = prev.teams[prev.playerTeam];
+      pt.units.forEach(u => (u.selected = false));
+      pt.buildings.forEach(b => (b.selected = false));
+      hero.selected = true;
+      return { ...prev, selectedUnits: [hero.id] };
+    });
+  }, []);
+
+  const handleCenterHero = useCallback((hero: Unit) => {
+    setGameState(prev => {
+      const pt = prev.teams[prev.playerTeam];
+      pt.units.forEach(u => (u.selected = false));
+      pt.buildings.forEach(b => (b.selected = false));
+      hero.selected = true;
+      setCamera({ x: hero.position.x - 400, y: hero.position.y - 300 });
+      return { ...prev, selectedUnits: [hero.id] };
+    });
+  }, []);
+
   const handleRestart = useCallback(() => {
     const ng = initializeGame(faction, mapSize, difficulty);
     setGameState(ng); setBuildMode(null); setCamera(getInitialCamera(ng));
@@ -413,6 +432,7 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
   const playerTeam = gameState.teams[gameState.playerTeam];
   const selectedUnits = playerTeam.units.filter(u => u.selected);
   const selectedBuildings = playerTeam.buildings.filter(b => b.selected);
+  const heroes = playerTeam.units.filter(u => u.isHero);
 
   const modeBanner = buildMode
     ? `[ СТРОИТЕЛЬСТВО ] ${BUILDING_CONFIGS[buildMode].name}  —  ЛКМ: поставить  |  ESC: отмена`
@@ -432,16 +452,39 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
             gameState={gameState}
             mapSize={mapSize}
             camera={camera}
+            zoom={zoom}
             buildMode={buildMode}
             attackMoveMode={attackMoveMode}
             abilityTargetMode={abilityTargetMode !== null}
             onCameraChange={setCamera}
+            onZoomChange={setZoom}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onRightClick={handleRightClick}
             onBuildPlace={handleBuildPlace}
           />
+
+          {/* Hero panel — top-left overlay on canvas */}
+          {heroes.length > 0 && (
+            <div className="absolute top-2 left-2 z-30 pointer-events-auto">
+              <HeroPanel
+                heroes={heroes}
+                teamColor={playerTeam.color}
+                glowColor={playerTeam.glowColor}
+                onSelect={handleSelectHero}
+                onCenter={handleCenterHero}
+              />
+            </div>
+          )}
+
+          {/* Zoom indicator */}
+          {Math.abs(zoom - 1) > 0.05 && (
+            <div className="absolute top-2 right-2 z-30 pointer-events-none px-2 py-1 rounded text-[10px] font-mono text-slate-400"
+              style={{ background: 'rgba(6,9,16,0.85)', border: '1px solid #1e293b' }}>
+              {Math.round(zoom * 100)}%
+            </div>
+          )}
 
           {/* Mode banner — centered at bottom of canvas */}
           {modeBanner && (
@@ -533,6 +576,8 @@ export default function Game({ faction, mapSize, difficulty }: GameProps) {
             onLevelUp={handleLevelUp}
             onCastAbility={handleCastAbility}
             abilityTargetMode={abilityTargetMode}
+            onSelectHero={handleSelectHero}
+            onCenterHero={handleCenterHero}
           />
         </div>
       </div>

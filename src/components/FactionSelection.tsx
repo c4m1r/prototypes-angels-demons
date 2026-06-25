@@ -32,7 +32,7 @@ export default function FactionSelection({ onSelectSettings }: FactionSelectionP
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center relative">
       <div className="absolute bottom-4 left-4 text-xs text-slate-600">
-        ver.0.6.4 by{' '}
+        ver.0.5.1 by{' '}
         <a
           href="https://c4m1r.github.io"
           target="_blank"
